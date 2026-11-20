@@ -1,0 +1,8 @@
+# 手动启动示例：dsh --profile sdk --patch RDshPlugins/responsible-host.cordis.yml
+# WPF 宿主会自动生成等价的运行时 patch（插件绝对路径），此文件供命令行调试。
+- insert:
+    - id: responsible-host
+      name: './responsible-host.mjs'
+
+- id: tool-plugin-manager
+  disabled: true

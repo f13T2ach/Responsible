@@ -1,0 +1,674 @@
+﻿<Application x:Class="Responsible.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:Responsible.ViewModel"
+             xmlns:view="clr-namespace:Responsible.View"
+             xmlns:conv="clr-namespace:Responsible.Infrastructure.Converters"
+             xmlns:beh="clr-namespace:Responsible.Infrastructure.Behaviors"
+             xmlns:controls="clr-namespace:Responsible.Controls">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <conv:BreakpointToVisibilityConverter x:Key="BreakpointToVisibilityConverter" />
+            <conv:EmptyStringToVisibilityConverter x:Key="EmptyStringToVisibilityConverter" />
+            <conv:FractionConverter x:Key="FractionConverter" />
+            <conv:EqualityToVisibilityConverter x:Key="EqualityToVisibilityConverter" />
+
+            <!--  VM → View 映射：ViewFrame 只持有 ViewModel，视图由模板解析  -->
+            <DataTemplate DataType="{x:Type vm:MoeViewModel}">
+                <view:Moe />
+            </DataTemplate>
+
+            <!--  扁平图标按钮（工具栏 / 侧栏通用），按下与聚焦均不改变文字颜色  -->
+            <Style x:Key="MoeFlatButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource {x:Type ui:Button}}">
+                <Setter Property="Appearance" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ui:Button}">
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="6"
+                                    Padding="{TemplateBinding Padding}"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0"
+                                                      Content="{TemplateBinding Icon}"
+                                                      Margin="0,0,8,0"
+                                                      VerticalAlignment="Center" />
+                                    <ContentPresenter Grid.Column="1"
+                                                      ContentSource="Content"
+                                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                      VerticalAlignment="Center"
+                                                      RecognizesAccessKey="True" />
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  侧栏导航按钮（插件 / 自动化 / 安全 / 站点 / 用户 / 设置）  -->
+            <Style x:Key="MoeSidebarButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource MoeFlatButtonStyle}">
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Margin" Value="8,1" />
+                <Setter Property="Padding" Value="10,7" />
+                <Setter Property="FontSize" Value="13" />
+            </Style>
+
+            <!--  工具栏图标按钮  -->
+            <Style x:Key="MoeToolbarIconButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource MoeFlatButtonStyle}">
+                <Setter Property="Padding" Value="6" />
+                <Setter Property="Margin" Value="2,0" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+
+            <!--  顶层菜单自绘紧凑模板。必须以局部值赋给 MenuItem.Template：
+                  WPF-UI 隐式样式用 Role 的 Style.Trigger 换模板，触发器优先级高于样式 Setter  -->
+            <ControlTemplate x:Key="MoeTopLevelMenuItemTemplate" TargetType="{x:Type ui:MenuItem}">
+                <Grid>
+                    <Border x:Name="Bd"
+                            Background="Transparent"
+                            CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter ContentSource="Header"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <Popup x:Name="PART_Popup"
+                           AllowsTransparency="True"
+                           Focusable="False"
+                           IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}"
+                           PlacementTarget="{Binding RelativeSource={RelativeSource TemplatedParent}}"
+                           Placement="Bottom"
+                           VerticalOffset="2"
+                           PopupAnimation="Fade">
+                        <Border Background="{DynamicResource SolidBackgroundFillColorQuarternaryBrush}"
+                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="4">
+                            <ItemsPresenter />
+                        </Border>
+                    </Popup>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property="IsHighlighted" Value="True">
+                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsSubmenuOpen" Value="True">
+                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                    </Trigger>
+                    <Trigger Property="IsEnabled" Value="False">
+                        <Setter Property="Opacity" Value="0.5" />
+                    </Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+
+            <!--  顶栏菜单项：配合 MoeTopLevelMenuItemTemplate 使用，子菜单仍走 WPF-UI 默认样式  -->
+            <Style x:Key="MoeToolbarMenuItemStyle" TargetType="{x:Type ui:MenuItem}" BasedOn="{StaticResource {x:Type ui:MenuItem}}">
+                <Setter Property="Height" Value="28" />
+                <Setter Property="Padding" Value="8,0" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            </Style>
+
+            <!--  工作区整行热区 Expander（无浅边框，chevron 随展开旋转）  -->
+            <Style x:Key="MoeWorkspaceHeaderToggleStyle" TargetType="{x:Type ToggleButton}">
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ToggleButton}">
+                            <Border x:Name="Bd"
+                                    Background="Transparent"
+                                    CornerRadius="6"
+                                    Margin="8,1"
+                                    Padding="10,7"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0" VerticalAlignment="Center" />
+                                    <ui:SymbolIcon x:Name="Chevron"
+                                                   Grid.Column="1"
+                                                   Symbol="ChevronDown24"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Center"
+                                                   RenderTransformOrigin="0.5,0.5"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                        <ui:SymbolIcon.RenderTransform>
+                                            <RotateTransform Angle="0" />
+                                        </ui:SymbolIcon.RenderTransform>
+                                    </ui:SymbolIcon>
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="False">
+                                    <Setter TargetName="Chevron" Property="RenderTransform">
+                                        <Setter.Value>
+                                            <RotateTransform Angle="-90" />
+                                        </Setter.Value>
+                                    </Setter>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="MoeWorkspaceExpanderStyle" TargetType="{x:Type Expander}">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Expander}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ToggleButton Grid.Row="0"
+                                              Style="{StaticResource MoeWorkspaceHeaderToggleStyle}"
+                                              IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                              Content="{TemplateBinding Header}" />
+                                <ContentPresenter x:Name="Body"
+                                                  Grid.Row="1"
+                                                  Content="{TemplateBinding Content}"
+                                                  ContentTemplate="{TemplateBinding ContentTemplate}" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsExpanded" Value="False">
+                                    <Setter TargetName="Body" Property="Visibility" Value="Collapsed" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  工作区展开后的对话列表  -->
+            <Style x:Key="MoeConversationItemStyle" TargetType="{x:Type ListBoxItem}">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="FontSize" Value="12.5" />
+                <Setter Property="Margin" Value="0,1" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                            <Border x:Name="ItemBorder"
+                                    Background="Transparent"
+                                    CornerRadius="6"
+                                    Padding="10,6">
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="MoeConversationListStyle" TargetType="{x:Type ListBox}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Margin" Value="26,2,8,4" />
+                <Setter Property="ItemContainerStyle" Value="{StaticResource MoeConversationItemStyle}" />
+                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            </Style>
+
+            <!--  顶部居中搜索胶囊  -->
+            <Style x:Key="MoeSearchPillStyle" TargetType="{x:Type Border}">
+                <Setter Property="Width" Value="420" />
+                <Setter Property="Height" Value="28" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+            </Style>
+
+            <!--  无chrome输入框：聚焦不出现accent高光，反馈由外层容器中性描边承担；失焦行为随控件附着  -->
+            <Style x:Key="MoeInputTextBoxStyle" TargetType="{x:Type TextBox}">
+                <Setter Property="beh:Defocus.OutsideClick" Value="True" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="CaretBrush" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="SelectionBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                <Setter Property="SelectionOpacity" Value="0.35" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+                <Setter Property="VerticalScrollBarVisibility" Value="Hidden" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TextBox}">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ScrollViewer x:Name="PART_ContentHost"
+                                              Focusable="False"
+                                              HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                                              VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  输入框占位符（覆盖层，不拦截命中）  -->
+            <Style x:Key="MoePlaceholderTextStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="IsHitTestVisible" Value="False" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+
+            <!--  内容区圆角纯色面板：ApplicationBackgroundBrush 随主题深浅，可承载 WebView2  -->
+            <Style x:Key="MoeContentPanelStyle" TargetType="{x:Type Border}">
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="Background" Value="{DynamicResource ApplicationBackgroundBrush}" />
+            </Style>
+
+            <!--  底部状态栏文字  -->
+            <Style x:Key="MoeStatusTextStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="MoeStatusIconStyle" TargetType="{x:Type ui:SymbolIcon}">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
+
+            <!--  侧栏分区标题  -->
+            <Style x:Key="MoeSidebarSectionHeaderStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="11" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Setter Property="Margin" Value="18,10,8,4" />
+            </Style>
+
+            <!--  ExView 宿主：scrim + 圆角卡片，打开期间整窗命中放行由 ExViewHost 钩子负责  -->
+            <Style TargetType="{x:Type controls:ExViewHost}">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type controls:ExViewHost}">
+                            <Grid>
+                                <Border x:Name="Scrim" Background="{DynamicResource SmokeFillColorDefaultBrush}" />
+                                <Border x:Name="Card"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType={x:Type controls:ExViewHost}}, Converter={StaticResource FractionConverter}, ConverterParameter=0.5}"
+                                        Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type controls:ExViewHost}}, Converter={StaticResource FractionConverter}, ConverterParameter=0.5}"
+                                        CornerRadius="12"
+                                        Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1">
+                                    <ContentPresenter />
+                                </Border>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  设置页左侧导航  -->
+            <Style x:Key="SettingsNavItemStyle" TargetType="{x:Type ListBoxItem}">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="FontSize" Value="13.5" />
+                <Setter Property="Margin" Value="0,2" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                            <Border x:Name="Bd"
+                                    Background="Transparent"
+                                    CornerRadius="8"
+                                    Padding="10,7">
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="SettingsNavListStyle" TargetType="{x:Type ListBox}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="ItemContainerStyle" Value="{StaticResource SettingsNavItemStyle}" />
+                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            </Style>
+
+            <!--  设置模型页：提供商卡片 / 状态点 / 虚线添加按钮  -->
+            <Style x:Key="ProviderCardStyle" TargetType="{x:Type Border}">
+                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="12,9" />
+                <Setter Property="Margin" Value="0,0,0,8" />
+                <Setter Property="Background" Value="Transparent" />
+            </Style>
+
+            <Style x:Key="ProviderStatusDotStyle" TargetType="{x:Type Ellipse}">
+                <Setter Property="Fill" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConfigured}" Value="True">
+                        <Setter Property="Fill" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="DashedAddButtonStyle" TargetType="{x:Type Button}">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Button}">
+                            <Grid>
+                                <Rectangle x:Name="Dash"
+                                           Fill="Transparent"
+                                           Stroke="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                           StrokeThickness="1"
+                                           StrokeDashArray="5 4"
+                                           RadiusX="10"
+                                           RadiusY="10" />
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Dash" Property="Fill" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Dash" Property="Fill" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  模型下拉菜单列表（分组小标题由控件 XAML 的 GroupStyle 提供）  -->
+            <Style x:Key="ModelOptionItemStyle" TargetType="{x:Type ListBoxItem}">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="FontSize" Value="13.5" />
+                <Setter Property="Margin" Value="0,1" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ListBoxItem}">
+                            <Border x:Name="Bd"
+                                    Background="Transparent"
+                                    CornerRadius="6"
+                                    Padding="10,7">
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="ModelOptionsListStyle" TargetType="{x:Type ListBox}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="ItemContainerStyle" Value="{StaticResource ModelOptionItemStyle}" />
+                <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            </Style>
+
+            <!--  对话框字段输入框：深色填充圆角，聚焦无 accent 高光，失焦行为随样式附着  -->
+            <Style x:Key="MoeFieldTextBoxStyle" TargetType="{x:Type TextBox}" BasedOn="{StaticResource MoeInputTextBoxStyle}">
+                <Setter Property="Background" Value="{DynamicResource ApplicationBackgroundBrush}" />
+                <Setter Property="Padding" Value="10,8" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="MinHeight" Value="38" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TextBox}">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8"
+                                    Padding="{TemplateBinding Padding}">
+                                <ScrollViewer x:Name="PART_ContentHost"
+                                              Focusable="False"
+                                              HorizontalScrollBarVisibility="{TemplateBinding HorizontalScrollBarVisibility}"
+                                              VerticalScrollBarVisibility="{TemplateBinding VerticalScrollBarVisibility}" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  对话框字段文字层级  -->
+            <Style x:Key="FieldLabelStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Margin" Value="0,16,0,6" />
+            </Style>
+
+            <Style x:Key="FieldHintStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Margin" Value="0,6,0,0" />
+            </Style>
+
+            <Style x:Key="FieldDescriptionStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+
+            <Style x:Key="FieldWarningStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="12.5" />
+                <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Margin" Value="0,8,0,0" />
+            </Style>
+
+            <!--  对话框确认按钮：深底白字 / 浅底黑字，随主题反转  -->
+            <Style x:Key="ConfirmButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource {x:Type ui:Button}}">
+                <Setter Property="Background" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource ApplicationBackgroundBrush}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ui:Button}">
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="6"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="Bd" Property="Opacity" Value="0.7" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Bd" Property="Opacity" Value="0.4" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  分段选项卡（第三方提供商 / 自定义 API）  -->
+            <Style x:Key="SegmentedTabItemStyle" TargetType="{x:Type TabItem}">
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TabItem}">
+                            <Border x:Name="Bd"
+                                    Background="Transparent"
+                                    CornerRadius="6"
+                                    Padding="14,6">
+                                <ContentPresenter ContentSource="Header" VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SolidBackgroundFillColorSecondaryBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="SegmentedTabControlStyle" TargetType="{x:Type TabControl}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="ItemContainerStyle" Value="{StaticResource SegmentedTabItemStyle}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type TabControl}">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top"
+                                        HorizontalAlignment="Left"
+                                        Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                                        CornerRadius="8"
+                                        Padding="3">
+                                    <TabPanel IsItemsHost="True" />
+                                </Border>
+                                <ContentPresenter ContentSource="SelectedContent" />
+                            </DockPanel>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--  对话框内轻量 Expander（自定义设置）  -->
+            <Style x:Key="MoeDialogExpanderStyle" TargetType="{x:Type Expander}">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="FontSize" Value="13.5" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type Expander}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ToggleButton Grid.Row="0"
+                                              FocusVisualStyle="{x:Null}"
+                                              IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                              Content="{TemplateBinding Header}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                            <StackPanel Orientation="Horizontal" Background="Transparent">
+                                                <ui:SymbolIcon x:Name="Chevron"
+                                                               Symbol="ChevronDown24"
+                                                               FontSize="12"
+                                                               Margin="0,0,8,0"
+                                                               VerticalAlignment="Center"
+                                                               RenderTransformOrigin="0.5,0.5"
+                                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                                    <ui:SymbolIcon.RenderTransform>
+                                                        <RotateTransform Angle="0" />
+                                                    </ui:SymbolIcon.RenderTransform>
+                                                </ui:SymbolIcon>
+                                                <ContentPresenter VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="False">
+                                                    <Setter TargetName="Chevron" Property="RenderTransform">
+                                                        <Setter.Value>
+                                                            <RotateTransform Angle="-90" />
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+                                <ContentPresenter x:Name="Body"
+                                                  Grid.Row="1"
+                                                  Content="{TemplateBinding Content}" />
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsExpanded" Value="False">
+                                    <Setter TargetName="Body" Property="Visibility" Value="Collapsed" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

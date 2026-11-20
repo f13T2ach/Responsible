@@ -1,0 +1,22 @@
+﻿<ui:FluentWindow x:Class="Responsible.MainWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+                 xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:controls="clr-namespace:Responsible.Controls"
+                 xmlns:vm="clr-namespace:Responsible.ViewModel"
+                 mc:Ignorable="d"
+                 d:DataContext="{d:DesignInstance Type=vm:MainWindowViewModel}"
+                 Title="{Binding Title}"
+                 Width="1324" Height="802"
+                 MinWidth="960" MinHeight="600"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica">
+    <Grid>
+        <controls:ViewFrame />
+        <controls:ExViewHost />
+        <ui:ContentDialogHost x:Name="DialogHost" />
+    </Grid>
+</ui:FluentWindow>

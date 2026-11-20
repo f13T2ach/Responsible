@@ -1,0 +1,15 @@
+{
+  "name": "rwebview",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Responsible embedded web modules (history / summary stats) for WPF WebView2",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}
