@@ -69,6 +69,7 @@ public class ExViewHost : ContentControl
         }
 
         BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(160)));
+        WeakReferenceMessenger.Default.Send(new ExViewOpenChangedMessage(true));
         exView.OnOpened();
         Dispatcher.BeginInvoke(() => view.Focus());
     }
@@ -91,6 +92,7 @@ public class ExViewHost : ContentControl
                 return;
             Visibility = Visibility.Collapsed;
             Content = null;
+            WeakReferenceMessenger.Default.Send(new ExViewOpenChangedMessage(false));
             closing.OnClosed();
         };
         BeginAnimation(OpacityProperty, fade);

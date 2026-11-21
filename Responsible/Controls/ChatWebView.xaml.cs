@@ -1,8 +1,10 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Web.WebView2.Core;
 using Responsible.Infrastructure;
+using Responsible.Messages;
 using Responsible.Services;
 using Wpf.Ui;
 using Wpf.Ui.Appearance;
@@ -27,6 +29,8 @@ public partial class ChatWebView : UserControl
         InitializeComponent();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        WeakReferenceMessenger.Default.Register<ExViewOpenChangedMessage>(
+            this, static (r, m) => ((ChatWebView)r).OnExViewOpenChanged(m.Value));
     }
 
     public IChatSessionService? Session
@@ -175,6 +179,13 @@ public partial class ChatWebView : UserControl
     private void OnStatsChanged(ChatStats stats) => Ui(() => Post(new HostStats(ToWire(stats))));
 
     private void OnRunningChanged(bool running) => Ui(() => Post(new HostAgentState(running ? "running" : "idle")));
+
+    // ExView 覆盖层与 WebView2 存在 airspace：打开期间折叠 Web 露出 WPF 卡片，关闭淡出后恢复
+    private void OnExViewOpenChanged(bool open) => Ui(() =>
+    {
+        if (_fallback) return;
+        Web.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+    });
 
     private void Ui(Action action)
     {
