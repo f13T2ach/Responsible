@@ -24,6 +24,26 @@ export interface WireMessage {
   state: "streaming" | "done" | "error";
   model?: string;
   ts: number;
+  reasoning?: string;
+  reasoningMs?: number;
+}
+
+export interface WireChangedFile {
+  path: string;
+  display: string;
+  added: number;
+  deleted: number;
+  binary?: boolean;
+  oversized?: boolean;
+}
+
+export interface WireChanges {
+  turn: number;
+  cwd: string;
+  total: number;
+  added: number;
+  deleted: number;
+  files: WireChangedFile[];
 }
 
 export interface WireStats {
@@ -36,21 +56,25 @@ export interface WireStats {
 }
 
 export type HostMessage =
-  | { type: "init"; protocol: 1; theme: "dark" | "light"; colors: Palette; messages: WireMessage[]; stats: WireStats }
+  | { type: "init"; protocol: 1; theme: "dark" | "light"; colors: Palette; messages: WireMessage[]; stats: WireStats; changes?: WireChanges[] }
   | { type: "theme"; theme: "dark" | "light"; colors: Palette }
   | { type: "history.reset"; messages: WireMessage[] }
   | { type: "message.append"; message: WireMessage }
   | { type: "message.delta"; id: string; text: string }
+  | { type: "reasoning.delta"; id: string; text: string }
   | { type: "message.restart"; id: string }
   | { type: "message.done"; id: string; state: "done" | "error" }
+  | { type: "changes.append"; changes: WireChanges }
   | { type: "stats"; stats: WireStats }
+  | { type: "toast"; text: string }
   | { type: "agent.state"; state: "running" | "idle" };
 
 export type WebMessage =
   | { type: "ready"; protocol: 1 }
   | { type: "copyText"; text: string }
   | { type: "retry"; id: string }
-  | { type: "stop"; id: string };
+  | { type: "stop"; id: string }
+  | { type: "openLink"; href: string };
 
 export const defaultPalette: Palette = {
   bg: "#202020",

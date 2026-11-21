@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -134,6 +136,39 @@ public partial class ChatWebView : UserControl
             case "stop":
                 if (msg.Id is { Length: > 0 }) _session?.Stop(msg.Id);
                 break;
+            case "openLink":
+                OpenExternal(msg.Href);
+                break;
+        }
+    }
+
+    // 只放行 http(s) 与真实存在的本地路径；其余一律拒绝并提示
+    private void OpenExternal(string? href)
+    {
+        if (string.IsNullOrWhiteSpace(href)) return;
+        try
+        {
+            if (Uri.TryCreate(href, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                return;
+            }
+            var path = href.StartsWith("file://", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(href, UriKind.Absolute, out var fileUri)
+                ? fileUri.LocalPath
+                : href;
+            if (!Path.IsPathRooted(path))
+                path = Path.Combine(_session?.WorkingDirectory ?? AppContext.BaseDirectory, path);
+            if (!File.Exists(path) && !Directory.Exists(path))
+            {
+                Post(new HostToast($"文件不存在：{path}"));
+                return;
+            }
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UriFormatException or ArgumentException)
+        {
+            Post(new HostToast("无法打开链接"));
         }
     }
 
@@ -148,8 +183,10 @@ public partial class ChatWebView : UserControl
     {
         session.Appended += OnAppended;
         session.Delivered += OnDelivered;
+        session.ReasoningDelivered += OnReasoningDelivered;
         session.Restarted += OnRestarted;
         session.Completed += OnCompleted;
+        session.ChangesReady += OnChangesReady;
         session.StatsChanged += OnStatsChanged;
         session.RunningChanged += OnRunningChanged;
     }
@@ -158,8 +195,10 @@ public partial class ChatWebView : UserControl
     {
         session.Appended -= OnAppended;
         session.Delivered -= OnDelivered;
+        session.ReasoningDelivered -= OnReasoningDelivered;
         session.Restarted -= OnRestarted;
         session.Completed -= OnCompleted;
+        session.ChangesReady -= OnChangesReady;
         session.StatsChanged -= OnStatsChanged;
         session.RunningChanged -= OnRunningChanged;
     }
@@ -172,9 +211,13 @@ public partial class ChatWebView : UserControl
 
     private void OnDelivered(string id, string chunk) => Ui(() => Post(new HostMessageDelta(id, chunk)));
 
+    private void OnReasoningDelivered(string id, string chunk) => Ui(() => Post(new HostReasoningDelta(id, chunk)));
+
     private void OnRestarted(string id) => Ui(() => Post(new HostMessageRestart(id)));
 
     private void OnCompleted(string id, string state) => Ui(() => Post(new HostMessageDone(id, state)));
+
+    private void OnChangesReady(ChatChanges changes) => Ui(() => Post(new HostChangesAppend(ToWire(changes))));
 
     private void OnStatsChanged(ChatStats stats) => Ui(() => Post(new HostStats(ToWire(stats))));
 
@@ -202,7 +245,8 @@ public partial class ChatWebView : UserControl
             WebBridge.ThemeOf(palette),
             palette,
             session.Messages.Select(ToWire).ToArray(),
-            ToWire(session.Stats)));
+            ToWire(session.Stats),
+            session.Changes.Select(ToWire).ToArray()));
     }
 
     private void Post(object message)
@@ -228,7 +272,22 @@ public partial class ChatWebView : UserControl
         FallbackList.ItemsSource = messages;
     }
 
-    private static WireMessage ToWire(ChatMessage m) => new(m.Id, m.Role, m.Text, m.State, m.Ts, m.Model);
+    private static WireMessage ToWire(ChatMessage m) =>
+        new(m.Id, m.Role, m.Text, m.State, m.Ts, m.Model, m.Reasoning, m.ReasoningMs);
+
+    private static WireChanges ToWire(ChatChanges c) => new(
+        c.Turn,
+        c.Cwd,
+        c.Total,
+        c.Added,
+        c.Deleted,
+        c.Files.Select(f => new WireChangedFile(
+            f.Path,
+            f.Display,
+            f.Added,
+            f.Deleted,
+            f.Binary ? true : null,
+            f.Oversized ? true : null)).ToArray());
 
     private static WireStats ToWire(ChatStats s) =>
         new(s.Rounds, s.Steps, s.TokensPerSecond, s.TotalTokens, s.CacheHitRate, s.ContextPercent);

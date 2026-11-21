@@ -35,6 +35,7 @@ namespace Responsible
             services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
             services.AddSingleton<INavigationService, NavigationService>();
             services.AddSingleton<IModelCatalogService, ModelCatalogService>();
+            services.AddSingleton<IWorkspaceChangeTracker, WorkspaceChangeTracker>();
             services.AddSingleton<IChatSessionService, ChatSessionService>();
             services.AddSingleton<IDshKernelService, DshKernelService>();
             services.AddSingleton<IAppThemeService, AppThemeService>();

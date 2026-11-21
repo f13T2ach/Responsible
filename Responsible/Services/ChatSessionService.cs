@@ -7,7 +7,15 @@ using Responsible.Messages;
 
 namespace Responsible.Services;
 
-public sealed record ChatMessage(string Id, string Role, string Text, string State, long Ts, string? Model = null);
+public sealed record ChatMessage(
+    string Id,
+    string Role,
+    string Text,
+    string State,
+    long Ts,
+    string? Model = null,
+    string? Reasoning = null,
+    long? ReasoningMs = null);
 
 public sealed record ChatStats(
     int Rounds,
@@ -21,11 +29,15 @@ public interface IChatSessionService
 {
     IReadOnlyList<ChatMessage> Messages { get; }
     ChatStats Stats { get; }
+    IReadOnlyList<ChatChanges> Changes { get; }
+    string WorkingDirectory { get; }
 
     event Action<ChatMessage>? Appended;
     event Action<string, string>? Delivered;
+    event Action<string, string>? ReasoningDelivered;
     event Action<string>? Restarted;
     event Action<string, string>? Completed;
+    event Action<ChatChanges>? ChangesReady;
     event Action<ChatStats>? StatsChanged;
     event Action<bool>? RunningChanged;
 
@@ -40,22 +52,32 @@ public sealed class ChatSessionService : IChatSessionService
 {
     private readonly object _gate = new();
     private readonly List<ChatMessage> _messages = [];
+    private readonly List<ChatChanges> _changes = [];
     private readonly Dictionary<string, CancellationTokenSource> _streams = new();
     private readonly IMessenger _messenger;
     private readonly IDshKernelService _kernel;
     private readonly IModelCatalogService _catalog;
+    private readonly IWorkspaceChangeTracker _changeTracker;
     private readonly string _kernelSessionId = Guid.NewGuid().ToString("n");
     private ChatStats _stats = new(0, 0, 0, 0, 0, 0);
     private string? _kernelAssistantId;
     private string _kernelText = string.Empty;
+    private string _kernelReasoning = string.Empty;
+    private DateTime? _reasoningStarted;
+    private int _turnSeq;
     private bool _kernelStartAttempted;
     private Stopwatch _stepWatch = new();
 
-    public ChatSessionService(IMessenger messenger, IDshKernelService kernel, IModelCatalogService catalog)
+    public ChatSessionService(
+        IMessenger messenger,
+        IDshKernelService kernel,
+        IModelCatalogService catalog,
+        IWorkspaceChangeTracker changeTracker)
     {
         _messenger = messenger;
         _kernel = kernel;
         _catalog = catalog;
+        _changeTracker = changeTracker;
         _kernel.SessionEvent += OnKernelEvent;
         _kernel.SessionStatus += OnKernelStatus;
     }
@@ -70,10 +92,19 @@ public sealed class ChatSessionService : IChatSessionService
         get { lock (_gate) return _stats; }
     }
 
+    public IReadOnlyList<ChatChanges> Changes
+    {
+        get { lock (_gate) return _changes.ToArray(); }
+    }
+
+    public string WorkingDirectory => WorkspaceRoot();
+
     public event Action<ChatMessage>? Appended;
     public event Action<string, string>? Delivered;
+    public event Action<string, string>? ReasoningDelivered;
     public event Action<string>? Restarted;
     public event Action<string, string>? Completed;
+    public event Action<ChatChanges>? ChangesReady;
     public event Action<ChatStats>? StatsChanged;
     public event Action<bool>? RunningChanged;
 
@@ -102,7 +133,14 @@ public sealed class ChatSessionService : IChatSessionService
         {
             var index = _messages.FindIndex(m => m.Id == id && m.Role == "assistant");
             if (index < 0 || _messages[index].State == "streaming") return;
-            _messages[index] = _messages[index] with { Text = string.Empty, State = "streaming", Ts = Now() };
+            _messages[index] = _messages[index] with
+            {
+                Text = string.Empty,
+                Reasoning = null,
+                ReasoningMs = null,
+                State = "streaming",
+                Ts = Now(),
+            };
             CancelStream(id);
             for (var i = index - 1; i >= 0; i--)
                 if (_messages[i].Role == "user")
@@ -118,6 +156,8 @@ public sealed class ChatSessionService : IChatSessionService
             {
                 _kernelAssistantId = id;
                 _kernelText = string.Empty;
+                _kernelReasoning = string.Empty;
+                _reasoningStarted = null;
             }
             _ = KernelPromptAsync(id, prompt);
         }
@@ -186,9 +226,13 @@ public sealed class ChatSessionService : IChatSessionService
         {
             _kernelAssistantId = id;
             _kernelText = string.Empty;
+            _kernelReasoning = string.Empty;
+            _reasoningStarted = null;
         }
         _stepWatch = Stopwatch.StartNew();
         RunningChanged?.Invoke(true);
+        // 基线快照必须先于模型动手：turn 结束时才能只统计本轮的改动
+        await _changeTracker.BeginAsync(WorkspaceRoot(), ++_turnSeq).ConfigureAwait(false);
         if (await _kernel.PromptAsync(_kernelSessionId, prompt).ConfigureAwait(false) is null)
         {
             lock (_gate) _kernelAssistantId = null;
@@ -222,26 +266,7 @@ public sealed class ChatSessionService : IChatSessionService
                 _stepWatch = Stopwatch.StartNew();
                 break;
             case "assistant/message":
-                var text = ExtractText(ev);
-                if (text.Length == 0) break;
-                string previous;
-                lock (_gate)
-                {
-                    var index = _messages.FindIndex(m => m.Id == id);
-                    if (index < 0 || _messages[index].State != "streaming") return;
-                    previous = _kernelText;
-                    _kernelText += (_kernelText.Length > 0 ? "\n\n" : "") + text;
-                    _messages[index] = _messages[index] with { Text = _kernelText };
-                    ApplyUsageLocked(ev);
-                    PublishStatsLocked();
-                }
-                if (_kernelText.StartsWith(previous, StringComparison.Ordinal))
-                    Delivered?.Invoke(id, _kernelText[previous.Length..]);
-                else
-                {
-                    Restarted?.Invoke(id);
-                    Delivered?.Invoke(id, _kernelText);
-                }
+                HandleAssistantMessage(id, ev);
                 break;
             case "turn/end":
                 lock (_gate)
@@ -249,14 +274,70 @@ public sealed class ChatSessionService : IChatSessionService
                     if (_kernelAssistantId != id) return;
                     _kernelAssistantId = null;
                     var index = _messages.FindIndex(m => m.Id == id);
-                    if (index >= 0) _messages[index] = _messages[index] with { State = "done" };
+                    if (index >= 0)
+                    {
+                        long? ms = _reasoningStarted is { } started
+                            ? (long)(DateTime.UtcNow - started).TotalMilliseconds
+                            : null;
+                        _reasoningStarted = null;
+                        _messages[index] = _messages[index] with { State = "done", ReasoningMs = ms ?? _messages[index].ReasoningMs };
+                    }
                     _stats = _stats with { TokensPerSecond = 0, Rounds = _stats.Rounds + 1 };
                     PublishStatsLocked();
                 }
                 RunningChanged?.Invoke(false);
                 Completed?.Invoke(id, "done");
+                _ = FinishChangesAsync();
                 break;
         }
+    }
+
+    private void HandleAssistantMessage(string id, JsonElement ev)
+    {
+        var reasoning = ExtractBlockText(ev, "reasoning");
+        if (reasoning.Length > 0)
+        {
+            string chunk;
+            lock (_gate)
+            {
+                var index = _messages.FindIndex(m => m.Id == id);
+                if (index < 0 || _messages[index].State != "streaming") return;
+                chunk = (_kernelReasoning.Length > 0 ? "\n\n" : "") + reasoning;
+                _kernelReasoning += chunk;
+                _reasoningStarted ??= DateTime.UtcNow;
+                _messages[index] = _messages[index] with { Reasoning = _kernelReasoning };
+            }
+            ReasoningDelivered?.Invoke(id, chunk);
+        }
+
+        var text = ExtractText(ev);
+        if (text.Length == 0) return;
+        string previous;
+        lock (_gate)
+        {
+            var index = _messages.FindIndex(m => m.Id == id);
+            if (index < 0 || _messages[index].State != "streaming") return;
+            previous = _kernelText;
+            _kernelText += (_kernelText.Length > 0 ? "\n\n" : "") + text;
+            _messages[index] = _messages[index] with { Text = _kernelText };
+            ApplyUsageLocked(ev);
+            PublishStatsLocked();
+        }
+        if (_kernelText.StartsWith(previous, StringComparison.Ordinal))
+            Delivered?.Invoke(id, _kernelText[previous.Length..]);
+        else
+        {
+            Restarted?.Invoke(id);
+            Delivered?.Invoke(id, _kernelText);
+        }
+    }
+
+    private async Task FinishChangesAsync()
+    {
+        var changes = await _changeTracker.EndAsync().ConfigureAwait(false);
+        if (changes is null || changes.Total == 0) return;
+        lock (_gate) _changes.Add(changes);
+        ChangesReady?.Invoke(changes);
     }
 
     // 调用方须持有 _gate
@@ -276,7 +357,9 @@ public sealed class ChatSessionService : IChatSessionService
         };
     }
 
-    private static string ExtractText(JsonElement ev)
+    private static string ExtractText(JsonElement ev) => ExtractBlockText(ev, "text");
+
+    private static string ExtractBlockText(JsonElement ev, string type)
     {
         if (!ev.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object)
             return string.Empty;
@@ -285,7 +368,7 @@ public sealed class ChatSessionService : IChatSessionService
         var parts = new List<string>();
         foreach (var block in content.EnumerateArray())
             if (block.ValueKind == JsonValueKind.Object
-                && block.TryGetProperty("type", out var bt) && bt.GetString() == "text"
+                && block.TryGetProperty("type", out var bt) && bt.GetString() == type
                 && block.TryGetProperty("text", out var text))
                 parts.Add(text.GetString() ?? "");
         return string.Concat(parts);
@@ -301,6 +384,9 @@ public sealed class ChatSessionService : IChatSessionService
 
     private static string WorkspaceRoot()
     {
+        var over = Environment.GetEnvironmentVariable("RESPONSIBLE_WORKSPACE");
+        if (!string.IsNullOrWhiteSpace(over) && Directory.Exists(over))
+            return Path.GetFullPath(over);
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         for (var i = 0; i < 6 && dir is not null; i++, dir = dir.Parent)
             if (File.Exists(Path.Combine(dir.FullName, "Responsible.slnx")))

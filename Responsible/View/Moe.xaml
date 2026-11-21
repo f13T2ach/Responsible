@@ -258,7 +258,7 @@
                 <!--  输入区  -->
                 <Border Grid.Row="1"
                         x:Name="InputCard"
-                        MaxWidth="860"
+                        MaxWidth="920"
                         Margin="24,8,24,16"
                         Padding="12">
                     <Border.Style>

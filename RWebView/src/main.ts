@@ -71,6 +71,11 @@ history.onAction = (action, id) => {
   else previewAction(action, id);
 };
 
+history.onOpenLink = (href) => {
+  if (connected) send({ type: "openLink", href });
+  else showToast("浏览器预览：不打开外部链接");
+};
+
 let previewAction: (action: "retry" | "stop", id: string) => void = () => {};
 
 onMessage((msg: HostMessage) => {
@@ -79,6 +84,7 @@ onMessage((msg: HostMessage) => {
       applyPalette(msg.theme, msg.colors);
       lastStats = msg.stats;
       history.reset(msg.messages);
+      for (const changes of msg.changes ?? []) history.appendChanges(changes);
       refreshEmpty();
       refreshStreaming();
       break;
@@ -98,6 +104,9 @@ onMessage((msg: HostMessage) => {
     case "message.delta":
       history.delta(msg.id, msg.text);
       break;
+    case "reasoning.delta":
+      history.reasoningDelta(msg.id, msg.text);
+      break;
     case "message.restart":
       history.restart(msg.id);
       refreshStreaming();
@@ -105,6 +114,13 @@ onMessage((msg: HostMessage) => {
     case "message.done":
       history.done(msg.id, msg.state);
       refreshStreaming();
+      break;
+    case "changes.append":
+      history.appendChanges(msg.changes);
+      refreshEmpty();
+      break;
+    case "toast":
+      showToast(msg.text);
       break;
     case "stats":
       lastStats = msg.stats;

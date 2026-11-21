@@ -66,6 +66,9 @@ export function installPreview(deps: Deps): (action: "retry" | "stop", id: strin
       model: "Test",
       state: "done",
       ts: now - 238000,
+      reasoning:
+        "会话视图需要同时满足三点：消息模型要稳定、滚动容器要能吸附底部、流式更新不能重建整棵 DOM。\n先看现有 HistoryView 的边界，再把思考链和文件改动作为独立通道挂上去。",
+      reasoningMs: 4200,
       text: `好的。会话视图需要三件事：**消息模型**、**滚动容器**、**流式更新通道**。\n\n1. 消息区分 user / assistant 两种角色，状态机为 streaming → done / error；\n2. 滚动容器默认吸附底部，用户上滚后出现"回到底部"；\n3. 增量文本以 delta 推送，避免整棵 DOM 重建。\n\n\`\`\`csharp\npublic sealed record ChatMessage(string Id, string Role, string Text, string State);\n\`\`\``,
     },
     { id: nid(), role: "user", text: "背景色要和 WPF 内容区完全一致，不能闪白", state: "done", ts: now - 120000 },
@@ -75,7 +78,7 @@ export function installPreview(deps: Deps): (action: "retry" | "stop", id: strin
       model: "Test",
       state: "done",
       ts: now - 118000,
-      text: `明白：颜色单一来源在 WPF 资源字典，Web 侧只接收下发值。\n\n- 导航前设置 \`DefaultBackgroundColor\`；\n- \`init\` 载荷带完整调色板；\n- 主题切换时再发 \`theme\` 消息即可热更新。`,
+      text: `明白：颜色单一来源在 WPF 资源字典，Web 侧只接收下发值。\n\n- 导航前设置 \`DefaultBackgroundColor\`；\n- \`init\` 载荷带完整调色板；\n- 主题切换时再发 \`theme\` 消息即可热更新。\n\n样式定义见 [Moe.xaml](D:/Responsible/Responsible/View/Moe.xaml)，仓库在 https://github.com/f13T2ach/Responsible 。`,
     },
   ];
   history.reset(seed);
@@ -100,6 +103,8 @@ export function installPreview(deps: Deps): (action: "retry" | "stop", id: strin
     stats.update(current, streaming);
   };
 
+  let changesShown = false;
+
   function stream(id: string): void {
     const words = reply.split(/(?<=\s)/);
     let i = 0;
@@ -122,9 +127,41 @@ export function installPreview(deps: Deps): (action: "retry" | "stop", id: strin
         history.done(id, "done");
         current = { ...current, tokensPerSecond: 0, rounds: current.rounds + 1 };
         pushStats(false);
+        if (!changesShown) {
+          changesShown = true;
+          history.appendChanges({
+            turn: 3,
+            cwd: "D:\\Responsible",
+            total: 3,
+            added: 17,
+            deleted: 1,
+            files: [
+              { path: "Responsible/View/Moe.xaml", display: "Responsible/View/Moe.xaml", added: 9, deleted: 1 },
+              { path: "RWebView/src/history.ts", display: "RWebView/src/history.ts", added: 6, deleted: 0 },
+              { path: "RWebView/src/styles.css", display: "RWebView/src/styles.css", added: 2, deleted: 0 },
+            ],
+          });
+          deps.refresh();
+        }
       }
     };
-    timers.set(id, window.setTimeout(tick, 42));
+    const thoughts = [
+      "先把现有链路过一遍：",
+      "历史消息由 HistoryView 渲染，",
+      "消息与统计都来自 ChatSessionService。",
+      "思考链与文件改动各走独立通道，",
+      "避免和正文增量互相干扰。",
+    ];
+    let ti = 0;
+    const think = (): void => {
+      if (ti < thoughts.length) {
+        history.reasoningDelta(id, thoughts[ti++]);
+        timers.set(id, window.setTimeout(think, 70));
+        return;
+      }
+      tick();
+    };
+    timers.set(id, window.setTimeout(think, 60));
   }
 
   window.setTimeout(() => {

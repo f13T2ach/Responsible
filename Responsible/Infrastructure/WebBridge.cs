@@ -26,7 +26,9 @@ public sealed record WireMessage(
     string Text,
     string State,
     long Ts,
-    string? Model = null);
+    string? Model = null,
+    string? Reasoning = null,
+    long? ReasoningMs = null);
 
 public sealed record WireStats(
     int Rounds,
@@ -36,12 +38,29 @@ public sealed record WireStats(
     double CacheHitRate,
     double ContextPercent);
 
+public sealed record WireChangedFile(
+    string Path,
+    string Display,
+    int Added,
+    int Deleted,
+    bool? Binary = null,
+    bool? Oversized = null);
+
+public sealed record WireChanges(
+    int Turn,
+    string Cwd,
+    int Total,
+    int Added,
+    int Deleted,
+    IReadOnlyList<WireChangedFile> Files);
+
 public sealed record HostInit(
     int Protocol,
     string Theme,
     WebPalette Colors,
     IReadOnlyList<WireMessage> Messages,
-    WireStats Stats)
+    WireStats Stats,
+    IReadOnlyList<WireChanges> Changes)
 {
     public string Type => "init";
 }
@@ -66,6 +85,21 @@ public sealed record HostMessageDelta(string Id, string Text)
     public string Type => "message.delta";
 }
 
+public sealed record HostReasoningDelta(string Id, string Text)
+{
+    public string Type => "reasoning.delta";
+}
+
+public sealed record HostChangesAppend(WireChanges Changes)
+{
+    public string Type => "changes.append";
+}
+
+public sealed record HostToast(string Text)
+{
+    public string Type => "toast";
+}
+
 public sealed record HostMessageRestart(string Id)
 {
     public string Type => "message.restart";
@@ -86,7 +120,7 @@ public sealed record HostAgentState(string State)
     public string Type => "agent.state";
 }
 
-public sealed record WebMessage(string Type, int? Protocol = null, string? Text = null, string? Id = null);
+public sealed record WebMessage(string Type, int? Protocol = null, string? Text = null, string? Id = null, string? Href = null);
 
 public static class WebBridge
 {
