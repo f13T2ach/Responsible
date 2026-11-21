@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+import "rvm/v1/common.proto";
+import "rvm/v1/control.proto";
+import "rvm/v1/session.proto";
+import "rvm/v1/shell.proto";
+import "rvm/v1/fs.proto";
+import "rvm/v1/workspace.proto";
+import "rvm/v1/audit.proto";
+
+message RpcRequest {
+  ProtocolVersion protocol = 1;
+  uint64 request_id = 2;
+
+  oneof body {
+    HelloRequest hello = 10;
+    PingRequest ping = 11;
+    ShutdownRequest shutdown = 12;
+
+    CreateSessionRequest create_session = 20;
+    CloseSessionRequest close_session = 21;
+    GetSessionRequest get_session = 22;
+    ListSessionsRequest list_sessions = 23;
+
+    ShellExecRequest shell_exec = 30;
+    ShellKillRequest shell_kill = 31;
+
+    ResolveRequest fs_resolve = 40;
+    StatRequest fs_stat = 41;
+    ListDirRequest fs_list_dir = 42;
+    ReadTextRequest fs_read_text = 43;
+    ReadBytesRequest fs_read_bytes = 44;
+    WriteTextRequest fs_write_text = 45;
+    EditTextRequest fs_edit_text = 46;
+    PatchTextRequest fs_patch_text = 47;
+    DeleteFileRequest fs_delete = 48;
+    MoveFileRequest fs_move = 49;
+    GlobRequest fs_glob = 50;
+    GrepRequest fs_grep = 51;
+
+    DiffRequest workspace_diff = 60;
+    ApplyRequest workspace_apply = 61;
+    RollbackRequest workspace_rollback = 62;
+
+    AuditQueryRequest audit_query = 70;
+  }
+}
+
+message RpcResponse {
+  ProtocolVersion protocol = 1;
+  uint64 request_id = 2;
+
+  oneof body {
+    Error error = 3;
+    Empty empty = 4;
+
+    HelloResponse hello = 10;
+    PongResponse pong = 11;
+    ShutdownResponse shutdown = 12;
+
+    CreateSessionResponse create_session = 20;
+    CloseSessionResponse close_session = 21;
+    GetSessionResponse get_session = 22;
+    ListSessionsResponse list_sessions = 23;
+
+    ShellExecStarted shell_exec_started = 30;
+    ShellKillResponse shell_killed = 31;
+
+    ResolveResponse fs_resolve = 40;
+    StatResponse fs_stat = 41;
+    ListDirResponse fs_list_dir = 42;
+    ReadTextResponse fs_read_text = 43;
+    ReadBytesResponse fs_read_bytes = 44;
+    WriteTextResponse fs_write_text = 45;
+    EditTextResponse fs_edit_text = 46;
+    PatchTextResponse fs_patch_text = 47;
+    DeleteFileResponse fs_delete = 48;
+    MoveFileResponse fs_move = 49;
+    GlobResponse fs_glob = 50;
+    GrepResponse fs_grep = 51;
+
+    DiffResponse workspace_diff = 60;
+    ApplyResponse workspace_apply = 61;
+    RollbackResponse workspace_rollback = 62;
+
+    AuditQueryResponse audit_query = 70;
+  }
+}
+
+message StreamFrame {
+  uint64 request_id = 1;
+  uint64 session_id = 2;
+
+  oneof body {
+    ShellExecStarted exec_started = 10;
+    ShellOutputChunk output = 11;
+    ShellExited exited = 12;
+    AuditEvent audit = 13;
+  }
+}

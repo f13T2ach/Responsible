@@ -25,6 +25,9 @@ public partial class ChatWebView : UserControl
     private IChatSessionService? _session;
     private bool _initialized;
     private bool _fallback;
+    private bool _exViewOpen;
+    private bool _moeViewOpen;
+    private bool _dialogOpen;
 
     public ChatWebView()
     {
@@ -33,6 +36,10 @@ public partial class ChatWebView : UserControl
         Unloaded += OnUnloaded;
         WeakReferenceMessenger.Default.Register<ExViewOpenChangedMessage>(
             this, static (r, m) => ((ChatWebView)r).OnExViewOpenChanged(m.Value));
+        WeakReferenceMessenger.Default.Register<MoeViewOpenChangedMessage>(
+            this, static (r, m) => ((ChatWebView)r).OnMoeViewOpenChanged(m.Value));
+        WeakReferenceMessenger.Default.Register<DialogOpenChangedMessage>(
+            this, static (r, m) => ((ChatWebView)r).OnDialogOpenChanged(m.Value));
     }
 
     public IChatSessionService? Session
@@ -130,8 +137,8 @@ public partial class ChatWebView : UserControl
                     // 剪贴板被其它进程占用时放弃本次复制
                 }
                 break;
-            case "retry":
-                if (msg.Id is { Length: > 0 }) _session?.Retry(msg.Id);
+            case "branch":
+                if (msg.Id is { Length: > 0 }) _ = BranchAsync(msg.Id);
                 break;
             case "stop":
                 if (msg.Id is { Length: > 0 }) _session?.Stop(msg.Id);
@@ -140,6 +147,21 @@ public partial class ChatWebView : UserControl
                 OpenExternal(msg.Href);
                 break;
         }
+    }
+
+    private async Task BranchAsync(string messageId)
+    {
+        if (_session is not { } session) return;
+        BranchResult result;
+        try
+        {
+            result = await session.BranchAsync(messageId);
+        }
+        catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
+        {
+            result = new BranchResult(false, $"分支失败：{ex.Message}");
+        }
+        if (!result.Ok) Post(new HostToast(result.Message));
     }
 
     // 只放行 http(s) 与真实存在的本地路径；其余一律拒绝并提示
@@ -182,6 +204,8 @@ public partial class ChatWebView : UserControl
     private void Subscribe(IChatSessionService session)
     {
         session.Appended += OnAppended;
+        session.MessageUpdated += OnMessageUpdated;
+        session.Reloaded += OnReloaded;
         session.Delivered += OnDelivered;
         session.ReasoningDelivered += OnReasoningDelivered;
         session.Restarted += OnRestarted;
@@ -189,11 +213,14 @@ public partial class ChatWebView : UserControl
         session.ChangesReady += OnChangesReady;
         session.StatsChanged += OnStatsChanged;
         session.RunningChanged += OnRunningChanged;
+        session.SessionLoadingChanged += OnSessionLoadingChanged;
     }
 
     private void Unsubscribe(IChatSessionService session)
     {
         session.Appended -= OnAppended;
+        session.MessageUpdated -= OnMessageUpdated;
+        session.Reloaded -= OnReloaded;
         session.Delivered -= OnDelivered;
         session.ReasoningDelivered -= OnReasoningDelivered;
         session.Restarted -= OnRestarted;
@@ -201,11 +228,23 @@ public partial class ChatWebView : UserControl
         session.ChangesReady -= OnChangesReady;
         session.StatsChanged -= OnStatsChanged;
         session.RunningChanged -= OnRunningChanged;
+        session.SessionLoadingChanged -= OnSessionLoadingChanged;
     }
 
     private void OnAppended(ChatMessage message) => Ui(() =>
     {
         Post(new HostMessageAppend(ToWire(message)));
+        RefreshFallback();
+    });
+
+    private void OnMessageUpdated(ChatMessage message) => Ui(() => Post(new HostMessageUpdate(ToWire(message))));
+
+    // 切换持久化会话后整段重置：消息、统计与改动都来自新的 Session
+    private void OnReloaded() => Ui(() =>
+    {
+        if (_session is not { } session) return;
+        Post(new HostHistoryReset(session.Messages.Select(ToWire).ToArray()));
+        Post(new HostStats(ToWire(session.Stats)));
         RefreshFallback();
     });
 
@@ -223,12 +262,38 @@ public partial class ChatWebView : UserControl
 
     private void OnRunningChanged(bool running) => Ui(() => Post(new HostAgentState(running ? "running" : "idle")));
 
-    // ExView 覆盖层与 WebView2 存在 airspace：打开期间折叠 Web 露出 WPF 卡片，关闭淡出后恢复
+    private void OnSessionLoadingChanged(bool loading) => Ui(() =>
+    {
+        RefreshFallback();
+        Post(new HostHistoryLoading(loading));
+    });
+
+    // ExView / Moe 页面覆盖层与 WebView2 存在 airspace：任一打开期间折叠 Web，全部关闭后恢复
     private void OnExViewOpenChanged(bool open) => Ui(() =>
     {
-        if (_fallback) return;
-        Web.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+        _exViewOpen = open;
+        UpdateWebVisibility();
     });
+
+    private void OnMoeViewOpenChanged(bool open) => Ui(() =>
+    {
+        _moeViewOpen = open;
+        UpdateWebVisibility();
+    });
+
+    private void OnDialogOpenChanged(bool open) => Ui(() =>
+    {
+        _dialogOpen = open;
+        UpdateWebVisibility();
+    });
+
+    private void UpdateWebVisibility()
+    {
+        if (_fallback) return;
+        Web.Visibility = _exViewOpen || _moeViewOpen || _dialogOpen
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
 
     private void Ui(Action action)
     {
@@ -246,7 +311,8 @@ public partial class ChatWebView : UserControl
             palette,
             session.Messages.Select(ToWire).ToArray(),
             ToWire(session.Stats),
-            session.Changes.Select(ToWire).ToArray()));
+            session.Changes.Select(ToWire).ToArray(),
+            session.IsSessionLoading));
     }
 
     private void Post(object message)
@@ -267,13 +333,43 @@ public partial class ChatWebView : UserControl
     {
         if (!_fallback) return;
         var messages = _session?.Messages ?? [];
-        FallbackEmpty.Visibility = messages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var loading = _session?.IsSessionLoading == true && messages.Count == 0;
+        FallbackLoading.Visibility = loading ? Visibility.Visible : Visibility.Collapsed;
+        FallbackEmpty.Visibility = messages.Count == 0 && !loading ? Visibility.Visible : Visibility.Collapsed;
         FallbackScroll.Visibility = messages.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FallbackList.ItemsSource = messages;
     }
 
     private static WireMessage ToWire(ChatMessage m) =>
-        new(m.Id, m.Role, m.Text, m.State, m.Ts, m.Model, m.Reasoning, m.ReasoningMs);
+        new(m.Id, m.Role, m.Text, m.State, m.Ts, m.Model, m.Reasoning, m.ReasoningMs,
+            ToWire(m.Usage), m.BranchSeq, m.BranchUnavailable,
+            m.Tools is { Count: > 0 } tools ? tools.Select(ToWire).ToArray() : null,
+            m.Parts is { Count: > 0 } parts
+                ? parts.Select(part => new WirePart(
+                    part.Kind,
+                    part.Text,
+                    part.Tool is null ? null : ToWire(part.Tool))).ToArray()
+                : null);
+
+    private static WireTool ToWire(ChatToolCall tool) =>
+        new(tool.CallId,
+            tool.Name,
+            tool.Variant,
+            tool.Summary,
+            tool.State,
+            tool.Ts,
+            tool.Output,
+            tool.Input,
+            tool.IsError ? true : null);
+
+    private static WireUsage? ToWire(ChatTurnUsage? usage) => usage is null ? null : new WireUsage(
+        usage.UncachedInputTokens,
+        usage.OutputTokens,
+        usage.TotalTokens,
+        usage.CacheReadTokens,
+        usage.CacheWriteTokens,
+        usage.ReasoningTokens,
+        usage.Routes.Select(route => new WireUsageRoute(route.Provider, route.Model)).ToArray());
 
     private static WireChanges ToWire(ChatChanges c) => new(
         c.Turn,

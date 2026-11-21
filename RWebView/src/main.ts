@@ -13,6 +13,11 @@ empty.className = "empty";
 empty.innerHTML = `${icons.sparkleBig}<span class="title">Make a response</span>`;
 app.append(empty);
 
+const loading = document.createElement("div");
+loading.className = "loading";
+loading.innerHTML = `<span class="spinner"></span><span class="title">正在加载会话…</span>`;
+app.append(loading);
+
 const toast = document.createElement("div");
 toast.className = "toast";
 document.body.append(toast);
@@ -30,10 +35,13 @@ let agentRunning = false;
 let lastStats: WireStats = { rounds: 0, steps: 0, tokensPerSecond: 0, totalTokens: 0, cacheHitRate: 0, contextPercent: 0 };
 
 let wasEmpty = true;
+let sessionLoading = false;
 
 function refreshEmpty(): void {
   const isEmpty = history.count === 0;
-  empty.style.display = isEmpty ? "flex" : "none";
+  const showLoading = sessionLoading && isEmpty;
+  loading.style.display = showLoading ? "flex" : "none";
+  empty.style.display = isEmpty && !sessionLoading ? "flex" : "none";
   stats.bar.style.display = isEmpty ? "none" : "flex";
   history.root.style.display = isEmpty ? "none" : "flex";
   if (wasEmpty && !isEmpty) history.snapBottom();
@@ -62,9 +70,13 @@ function copyText(text: string): void {
 history.onCopyCode = copyText;
 history.onAction = (action, id) => {
   if (action === "copy") {
-    const node = history.scroll.querySelector<HTMLElement>(`.msg-assistant[data-id="${id}"] .msg-body`);
-    copyText(node?.innerText ?? "");
+    copyText(history.textOf(id));
     history.markCopied(id);
+    return;
+  }
+  if (action === "branch") {
+    if (connected) send({ type: "branch", id });
+    else showToast("浏览器预览：不创建分支");
     return;
   }
   if (connected) send({ type: action, id });
@@ -76,13 +88,14 @@ history.onOpenLink = (href) => {
   else showToast("浏览器预览：不打开外部链接");
 };
 
-let previewAction: (action: "retry" | "stop", id: string) => void = () => {};
+let previewAction: (action: "stop", id: string) => void = () => {};
 
 onMessage((msg: HostMessage) => {
   switch (msg.type) {
     case "init":
       applyPalette(msg.theme, msg.colors);
       lastStats = msg.stats;
+      sessionLoading = msg.loading === true;
       history.reset(msg.messages);
       for (const changes of msg.changes ?? []) history.appendChanges(changes);
       refreshEmpty();
@@ -95,6 +108,10 @@ onMessage((msg: HostMessage) => {
       history.reset(msg.messages);
       refreshEmpty();
       refreshStreaming();
+      break;
+    case "history.loading":
+      sessionLoading = msg.loading;
+      refreshEmpty();
       break;
     case "message.append":
       history.append(msg.message);
@@ -109,6 +126,10 @@ onMessage((msg: HostMessage) => {
       break;
     case "message.restart":
       history.restart(msg.id);
+      refreshStreaming();
+      break;
+    case "message.update":
+      history.update(msg.message);
       refreshStreaming();
       break;
     case "message.done":

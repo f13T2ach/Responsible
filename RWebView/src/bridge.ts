@@ -17,6 +17,40 @@ export interface Palette {
   codeBg: string;
 }
 
+export interface WireUsageRoute {
+  provider: string;
+  model: string;
+}
+
+// DSH token-meter 的精确轮次用量：所有计费尝试求和，可选桶只在每次尝试都报告时出现
+export interface WireUsage {
+  uncachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  routes?: WireUsageRoute[];
+}
+
+export interface WireTool {
+  callId: string;
+  name: string;
+  variant: "bash" | "read" | "search" | "write" | "edit" | "code" | "mcp" | "tools";
+  summary: string;
+  state: "running" | "ok" | "error" | "stopped";
+  ts: number;
+  output?: string;
+  input?: string;
+  isError?: boolean;
+}
+
+// 一轮内的时序分段：推理、正文、工具调用按发生顺序排列，流式时由前端增量维护
+export type WirePart =
+  | { kind: "reasoning"; text: string; ms?: number }
+  | { kind: "text"; text: string }
+  | { kind: "tool"; tool: WireTool };
+
 export interface WireMessage {
   id: string;
   role: "user" | "assistant";
@@ -26,6 +60,11 @@ export interface WireMessage {
   ts: number;
   reasoning?: string;
   reasoningMs?: number;
+  usage?: WireUsage;
+  branchSeq?: number;
+  branchUnavailable?: boolean;
+  tools?: WireTool[];
+  parts?: WirePart[];
 }
 
 export interface WireChangedFile {
@@ -56,13 +95,15 @@ export interface WireStats {
 }
 
 export type HostMessage =
-  | { type: "init"; protocol: 1; theme: "dark" | "light"; colors: Palette; messages: WireMessage[]; stats: WireStats; changes?: WireChanges[] }
+  | { type: "init"; protocol: 1; theme: "dark" | "light"; colors: Palette; messages: WireMessage[]; stats: WireStats; changes?: WireChanges[]; loading?: boolean }
   | { type: "theme"; theme: "dark" | "light"; colors: Palette }
   | { type: "history.reset"; messages: WireMessage[] }
+  | { type: "history.loading"; loading: boolean }
   | { type: "message.append"; message: WireMessage }
   | { type: "message.delta"; id: string; text: string }
   | { type: "reasoning.delta"; id: string; text: string }
   | { type: "message.restart"; id: string }
+  | { type: "message.update"; message: WireMessage }
   | { type: "message.done"; id: string; state: "done" | "error" }
   | { type: "changes.append"; changes: WireChanges }
   | { type: "stats"; stats: WireStats }
@@ -72,7 +113,7 @@ export type HostMessage =
 export type WebMessage =
   | { type: "ready"; protocol: 1 }
   | { type: "copyText"; text: string }
-  | { type: "retry"; id: string }
+  | { type: "branch"; id: string }
   | { type: "stop"; id: string }
   | { type: "openLink"; href: string };
 

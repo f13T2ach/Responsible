@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+import "rvm/v1/common.proto";
+
+enum FileKind {
+  FILE_KIND_UNSPECIFIED = 0;
+  FILE_KIND_FILE = 1;
+  FILE_KIND_DIRECTORY = 2;
+  FILE_KIND_SYMLINK = 3;
+  FILE_KIND_OTHER = 4;
+}
+
+message FileStat {
+  string path = 1;
+  FileKind kind = 2;
+  uint64 size = 3;
+  uint64 modified_unix_ms = 4;
+  bool read_only = 5;
+  ContentHash hash = 6;
+}
+
+message ResolveRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  string cwd = 3;
+}
+
+message ResolveResponse {
+  string normalized_path = 1;
+  bool exists = 2;
+}
+
+message StatRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  bool follow_links = 3;
+}
+
+message StatResponse {
+  FileStat stat = 1;
+}
+
+message ListDirRequest {
+  uint64 session_id = 1;
+  string path = 2;
+}
+
+message DirEntry {
+  string name = 1;
+  FileStat stat = 2;
+}
+
+message ListDirResponse {
+  repeated DirEntry entries = 1;
+}
+
+message ReadTextRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  uint32 max_bytes = 3;
+}
+
+message ReadTextResponse {
+  string text = 1;
+  bool truncated = 2;
+  ContentHash hash = 3;
+}
+
+message ReadBytesRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  uint64 offset = 3;
+  uint32 length = 4;
+}
+
+message ReadBytesResponse {
+  bytes data = 1;
+  bool eof = 2;
+  ContentHash hash = 3;
+}
+
+message WriteTextRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  string text = 3;
+  ContentHash expected_hash = 4;
+  bool create_only = 5;
+  SandboxPolicy policy = 6;
+}
+
+message WriteTextResponse {
+  ContentHash before_hash = 1;
+  ContentHash after_hash = 2;
+}
+
+message EditTextRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  string old_text = 3;
+  string new_text = 4;
+  bool replace_all = 5;
+  ContentHash expected_hash = 6;
+  SandboxPolicy policy = 7;
+}
+
+message EditTextResponse {
+  ContentHash before_hash = 1;
+  ContentHash after_hash = 2;
+  uint32 replacements = 3;
+}
+
+message PatchHunk {
+  uint32 old_start = 1;
+  uint32 old_lines = 2;
+  uint32 new_start = 3;
+  uint32 new_lines = 4;
+  repeated string lines = 5;
+}
+
+message PatchTextRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  repeated PatchHunk hunks = 3;
+  ContentHash expected_hash = 4;
+  SandboxPolicy policy = 5;
+}
+
+message PatchTextResponse {
+  ContentHash before_hash = 1;
+  ContentHash after_hash = 2;
+}
+
+message DeleteFileRequest {
+  uint64 session_id = 1;
+  string path = 2;
+  ContentHash expected_hash = 3;
+  bool recursive = 4;
+  SandboxPolicy policy = 5;
+}
+
+message DeleteFileResponse {
+  ContentHash before_hash = 1;
+}
+
+message MoveFileRequest {
+  uint64 session_id = 1;
+  string source = 2;
+  string destination = 3;
+  ContentHash expected_hash = 4;
+  bool overwrite = 5;
+  SandboxPolicy policy = 6;
+}
+
+message MoveFileResponse {
+  ContentHash source_before_hash = 1;
+}
+
+message GlobRequest {
+  uint64 session_id = 1;
+  string pattern = 2;
+  string cwd = 3;
+  uint32 max_results = 4;
+}
+
+message GlobMatch {
+  string path = 1;
+  FileKind kind = 2;
+}
+
+message GlobResponse {
+  repeated GlobMatch matches = 1;
+  bool truncated = 2;
+}
+
+message GrepRequest {
+  uint64 session_id = 1;
+  string pattern = 2;
+  string path = 3;
+  string glob = 4;
+  bool case_sensitive = 5;
+  bool fixed_strings = 6;
+  uint32 max_results = 7;
+  uint32 context_lines = 8;
+}
+
+message GrepLine {
+  uint64 line_number = 1;
+  string text = 2;
+  bool is_context = 3;
+}
+
+message GrepFileMatches {
+  string path = 1;
+  repeated GrepLine lines = 2;
+}
+
+message GrepResponse {
+  repeated GrepFileMatches files = 1;
+  bool truncated = 2;
+}

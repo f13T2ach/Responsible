@@ -5,20 +5,6 @@ using Wpf.Ui.Appearance;
 
 namespace Responsible.Services;
 
-public enum ThemeMode
-{
-    System,
-    Light,
-    Dark,
-}
-
-public interface IAppThemeService
-{
-    ThemeMode Mode { get; set; }
-
-    void Attach(Window window);
-}
-
 public sealed class AppThemeService : IAppThemeService
 {
     private static readonly string ConfigPath = Path.Combine(

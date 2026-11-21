@@ -7,3 +7,6 @@ node_modules/
 *.suo
 TestResults/
 artifacts/
+RVM/build/
+RVM/cmake-build-debug/
+RVM/.cache/

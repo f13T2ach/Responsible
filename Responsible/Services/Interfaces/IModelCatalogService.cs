@@ -23,4 +23,7 @@ public interface IModelCatalogService
     void Remove(ProviderViewModel provider);
 
     void OpenConfigFile();
+
+    // 用 DSH 运行时注册的 provider/model 目录刷新选择器；凭据仍由 DSH 自己解析
+    void ApplyDshModels(IReadOnlyList<DshModelRow> models);
 }

@@ -23,13 +23,18 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IProviderEditorService _editor;
     private readonly IAppThemeService _theme;
     private readonly IMessenger _messenger;
+    private readonly IWinFspService _winFsp;
 
-    public SettingsViewModel(IModelCatalogService catalog, IProviderEditorService editor, IAppThemeService theme, IMessenger messenger)
+    public SettingsViewModel(IModelCatalogService catalog, IProviderEditorService editor, IAppThemeService theme, IMessenger messenger, IWinFspService winFsp)
     {
         _catalog = catalog;
         _editor = editor;
         _theme = theme;
         _messenger = messenger;
+        _winFsp = winFsp;
+        _winFspDriveLetter = winFsp.DriveLetter;
+        WinFspDriveLetters = winFsp.AvailableDriveLetters();
+        RefreshWinFsp();
         _selectedNavItem = NavItems.First(i => i.Id == "models");
     }
 
@@ -73,6 +78,67 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     public ObservableCollection<ProviderViewModel> Providers => _catalog.Providers;
+
+    public IReadOnlyList<string> WinFspDriveLetters { get; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WinFspStatusText))]
+    [NotifyPropertyChangedFor(nameof(WinFspInstallerText))]
+    private bool _isWinFspInstalled;
+
+    [ObservableProperty]
+    private string _winFspVersion = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWinFspNotBusy))]
+    private bool _isWinFspBusy;
+
+    [ObservableProperty]
+    private string _winFspError = string.Empty;
+
+    [ObservableProperty]
+    private string _winFspDriveLetter;
+
+    public string WinFspStatusText => IsWinFspInstalled ? $"已安装 {WinFspVersion}" : "未安装";
+
+    public string WinFspInstallerText => IsWinFspInstalled ? "修复 / 重装" : "安装 WinFsp";
+
+    public bool IsWinFspNotBusy => !IsWinFspBusy;
+
+    partial void OnWinFspDriveLetterChanged(string value)
+    {
+        if (_winFsp.TrySetDriveLetter(value, out var error))
+            WinFspError = string.Empty;
+        else
+            WinFspError = error ?? "盘符无效。";
+    }
+
+    [RelayCommand]
+    private void RefreshWinFsp()
+    {
+        var probe = _winFsp.Probe();
+        IsWinFspInstalled = probe.Installed;
+        WinFspVersion = probe.Installed ? probe.Version : string.Empty;
+    }
+
+    [RelayCommand]
+    private async Task InstallWinFspAsync()
+    {
+        IsWinFspBusy = true;
+        WinFspError = string.Empty;
+        try
+        {
+            var result = await _winFsp.InstallAsync();
+            if (result.Success)
+                RefreshWinFsp();
+            else
+                WinFspError = result.Message;
+        }
+        finally
+        {
+            IsWinFspBusy = false;
+        }
+    }
 
     [RelayCommand]
     private void Close() => _messenger.Send(new CloseExViewMessage());

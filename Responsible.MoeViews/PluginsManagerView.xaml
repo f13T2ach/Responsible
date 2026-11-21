@@ -1,0 +1,305 @@
+<UserControl x:Class="Responsible.MoeViews.PluginsManagerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:local="clr-namespace:Responsible.MoeViews"
+             xmlns:plugins="clr-namespace:Responsible.MoeViews.Plugins"
+             mc:Ignorable="d"
+             Focusable="True"
+             FocusVisualStyle="{x:Null}"
+             d:DesignHeight="680" d:DesignWidth="960">
+    <UserControl.Resources>
+        <local:BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <Style x:Key="PluginIconButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource {x:Type ui:Button}}">
+            <Setter Property="Appearance" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="8" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
+        <Style x:Key="PluginSectionHeaderStyle" TargetType="{x:Type TextBlock}">
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="PluginRowCardStyle" TargetType="{x:Type Border}">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="14,12" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+        </Style>
+
+        <DataTemplate x:Key="PluginRowTemplate" DataType="{x:Type plugins:PluginItemViewModel}">
+            <Border Style="{StaticResource PluginRowCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0"
+                            Width="34" Height="34"
+                            CornerRadius="9"
+                            VerticalAlignment="Center"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                        <ui:SymbolIcon Symbol="PuzzlePiece24"
+                                       FontSize="16"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Margin="12,0,16,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Title}"
+                                       FontSize="13.5"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <Border Margin="8,0,0,0"
+                                    Padding="5,1"
+                                    CornerRadius="4"
+                                    VerticalAlignment="Center"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                    Visibility="{Binding PendingRestart, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding PendingText}"
+                                           FontSize="10.5"
+                                           Foreground="{DynamicResource SystemFillColorAttentionBrush}" />
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Text="{Binding ModuleName}"
+                                   Margin="0,2,0,0"
+                                   FontSize="11.5"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <TextBlock Text="{Binding Description}"
+                                   Margin="0,4,0,0"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding HasDescription, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Text="{Binding ReadOnlyReason}"
+                                   Margin="0,4,0,0"
+                                   FontSize="11.5"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                   Visibility="{Binding HasReadOnlyReason, Converter={StaticResource BoolToVisibility}}" />
+                        <TextBlock Text="{Binding Diagnostic}"
+                                   Margin="0,4,0,0"
+                                   FontSize="11.5"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                   Visibility="{Binding HasDiagnostic, Converter={StaticResource BoolToVisibility}}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <ui:ToggleSwitch IsChecked="{Binding IsOn, Mode=TwoWay}"
+                                         OnContent=""
+                                         OffContent=""
+                                         Visibility="{Binding CanToggle, Converter={StaticResource BoolToVisibility}}" />
+                        <ui:SymbolIcon Symbol="LockClosed24"
+                                       FontSize="14"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       ToolTip="受宿主保护，无法停用"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Visibility="{Binding CanToggle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
+                        <TextBlock Text="{Binding StatusText}"
+                                   Margin="0,4,0,0"
+                                   FontSize="11"
+                                   HorizontalAlignment="Right">
+                            <TextBlock.Style>
+                                <Style TargetType="{x:Type TextBlock}">
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Status}" Value="{x:Static plugins:PluginRuntimeStatus.Active}">
+                                            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Status}" Value="{x:Static plugins:PluginRuntimeStatus.Failed}">
+                                            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid Margin="26,18,26,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <ui:Button Grid.Column="0"
+                       Style="{StaticResource PluginIconButtonStyle}"
+                       Icon="{ui:SymbolIcon Symbol=ChevronLeft24}"
+                       Command="{Binding CloseCommand}"
+                       ToolTip="返回对话"
+                       VerticalAlignment="Center" />
+
+            <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="插件"
+                           FontSize="18"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <TextBlock Text="管理 DSH 内核插件；启用或停用会在重启内核后生效。"
+                           Margin="0,3,0,0"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:Button Content="重启内核"
+                           Appearance="Secondary"
+                           FontSize="12.5"
+                           Padding="12,6"
+                           Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                           Command="{Binding RestartKernelCommand}"
+                           IsEnabled="{Binding CanRestartKernel}"
+                           Visibility="{Binding HasPendingRestart, Converter={StaticResource BoolToVisibility}}" />
+                <ui:Button Style="{StaticResource PluginIconButtonStyle}"
+                           Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                           Margin="8,0,0,0"
+                           Command="{Binding RefreshCommand}"
+                           ToolTip="刷新插件列表" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="0,16,0,0">
+            <ui:TextBox Width="340"
+                        HorizontalAlignment="Left"
+                        PlaceholderText="搜索插件名称或模块"
+                        Icon="{ui:SymbolIcon Symbol=Search24}"
+                        Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:ProgressRing Width="18" Height="18"
+                                 IsIndeterminate="True"
+                                 Visibility="{Binding IsLoading, Converter={StaticResource BoolToVisibility}}" />
+                <Ellipse Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center">
+                    <Ellipse.Style>
+                        <Style TargetType="{x:Type Ellipse}">
+                            <Setter Property="Fill" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsLive}" Value="True">
+                                    <Setter Property="Fill" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+                <TextBlock Text="{Binding StatusText}"
+                           FontSize="11.5"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="2">
+            <Border Margin="0,12,0,0"
+                    Padding="12,8"
+                    CornerRadius="8"
+                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    Visibility="{Binding HasPendingRestart, Converter={StaticResource BoolToVisibility}}">
+                <DockPanel>
+                    <ui:SymbolIcon DockPanel.Dock="Left"
+                                   Symbol="Info24"
+                                   FontSize="14"
+                                   Margin="0,0,8,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource SystemFillColorAttentionBrush}" />
+                    <TextBlock Text="{Binding PendingText}"
+                               FontSize="12"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </DockPanel>
+            </Border>
+            <TextBlock Text="{Binding LastMessage}"
+                       Margin="2,8,0,0"
+                       FontSize="11.5"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                       Visibility="{Binding HasMessage, Converter={StaticResource BoolToVisibility}}" />
+        </StackPanel>
+
+        <Grid Grid.Row="3" Margin="0,12,0,0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,8,0">
+                <StackPanel>
+                    <StackPanel Visibility="{Binding HasUserPlugins, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal" Margin="2,4,0,8">
+                            <TextBlock Text="用户插件" Style="{StaticResource PluginSectionHeaderStyle}" />
+                            <TextBlock Text="{Binding UserCount, StringFormat=· {0}}"
+                                       Margin="6,0,0,0"
+                                       Style="{StaticResource PluginSectionHeaderStyle}" />
+                            <TextBlock Text="来自 RDshPlugins 或第三方包"
+                                       Margin="10,0,0,0"
+                                       FontSize="11"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding UserView}"
+                                      ItemTemplate="{StaticResource PluginRowTemplate}" />
+                    </StackPanel>
+
+                    <StackPanel Margin="0,14,0,0"
+                                Visibility="{Binding HasBuiltInPlugins, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal" Margin="2,4,0,8">
+                            <TextBlock Text="DSH 内置" Style="{StaticResource PluginSectionHeaderStyle}" />
+                            <TextBlock Text="{Binding BuiltInCount, StringFormat=· {0}}"
+                                       Margin="6,0,0,0"
+                                       Style="{StaticResource PluginSectionHeaderStyle}" />
+                            <TextBlock Text="随 DSH 内核发布"
+                                       Margin="10,0,0,0"
+                                       FontSize="11"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding BuiltInView}"
+                                      ItemTemplate="{StaticResource PluginRowTemplate}" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibility}}">
+                <ui:SymbolIcon Symbol="PuzzlePiece24"
+                               FontSize="34"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                <TextBlock Text="没有找到插件"
+                           Margin="0,12,0,0"
+                           FontSize="14"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="插件来自 DSH 内置包与 RDshPlugins 目录；启动内核后可读取实时状态。"
+                           Margin="0,4,0,0"
+                           FontSize="11.5"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

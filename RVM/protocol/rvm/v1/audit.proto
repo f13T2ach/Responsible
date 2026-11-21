@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+enum AuditKind {
+  AUDIT_KIND_UNSPECIFIED = 0;
+  AUDIT_KIND_SESSION_CREATED = 1;
+  AUDIT_KIND_SESSION_CLOSED = 2;
+  AUDIT_KIND_EXEC_STARTED = 3;
+  AUDIT_KIND_EXEC_FINISHED = 4;
+  AUDIT_KIND_FILE_READ = 5;
+  AUDIT_KIND_FILE_WRITTEN = 6;
+  AUDIT_KIND_FILE_DELETED = 7;
+  AUDIT_KIND_MASKED_BLOCKED = 8;
+  AUDIT_KIND_PATH_DENIED = 9;
+  AUDIT_KIND_POLICY_DENIED = 10;
+  AUDIT_KIND_APPROVAL = 11;
+  AUDIT_KIND_SYNC_APPLIED = 12;
+  AUDIT_KIND_ROLLBACK = 13;
+}
+
+message AuditEvent {
+  uint64 sequence = 1;
+  uint64 unix_ms = 2;
+  AuditKind kind = 3;
+  uint64 session_id = 4;
+  string path = 5;
+  string detail = 6;
+}
+
+message AuditQueryRequest {
+  uint64 session_id = 1;
+  uint64 after_sequence = 2;
+  uint32 limit = 3;
+}
+
+message AuditQueryResponse {
+  repeated AuditEvent events = 1;
+}

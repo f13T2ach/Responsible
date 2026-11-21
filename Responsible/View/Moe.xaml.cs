@@ -1,5 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using Responsible.ViewModel;
 using Wpf.Ui.Controls;
 
 namespace Responsible.View
@@ -13,6 +15,20 @@ namespace Responsible.View
         {
             InitializeComponent();
             HostTitleBar.WndProcInvoked += OnTitleBarWndProc;
+        }
+
+        // 列表项自己消费 MouseDown 做选中，需要在这里接 Up 才能覆盖“重复点击当前对话”
+        private void OnConversationClicked(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is not ListBox listBox
+                || e.OriginalSource is not DependencyObject source
+                || ItemsControl.ContainerFromElement(listBox, source) is not ListBoxItem item
+                || DataContext is not MoeViewModel viewModel)
+            {
+                return;
+            }
+
+            viewModel.OpenConversationCommand.Execute(item.DataContext as ConversationItemViewModel);
         }
 
         // TitleBar 的命中钩子默认把整条标题栏判为 HTCAPTION 拖拽区，叠加其上的菜单簇与搜索控件需在此放行

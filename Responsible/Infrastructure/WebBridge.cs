@@ -20,6 +20,30 @@ public sealed record WebPalette(
     string Critical,
     string CodeBg);
 
+public sealed record WireUsageRoute(string Provider, string Model);
+
+public sealed record WireUsage(
+    long UncachedInputTokens,
+    long OutputTokens,
+    long TotalTokens,
+    long? CacheReadTokens = null,
+    long? CacheWriteTokens = null,
+    long? ReasoningTokens = null,
+    IReadOnlyList<WireUsageRoute>? Routes = null);
+
+public sealed record WireTool(
+    string CallId,
+    string Name,
+    string Variant,
+    string Summary,
+    string State,
+    long Ts,
+    string? Output = null,
+    string? Input = null,
+    bool? IsError = null);
+
+public sealed record WirePart(string Kind, string Text, WireTool? Tool = null);
+
 public sealed record WireMessage(
     string Id,
     string Role,
@@ -28,7 +52,12 @@ public sealed record WireMessage(
     long Ts,
     string? Model = null,
     string? Reasoning = null,
-    long? ReasoningMs = null);
+    long? ReasoningMs = null,
+    WireUsage? Usage = null,
+    long? BranchSeq = null,
+    bool? BranchUnavailable = null,
+    IReadOnlyList<WireTool>? Tools = null,
+    IReadOnlyList<WirePart>? Parts = null);
 
 public sealed record WireStats(
     int Rounds,
@@ -60,7 +89,8 @@ public sealed record HostInit(
     WebPalette Colors,
     IReadOnlyList<WireMessage> Messages,
     WireStats Stats,
-    IReadOnlyList<WireChanges> Changes)
+    IReadOnlyList<WireChanges> Changes,
+    bool Loading)
 {
     public string Type => "init";
 }
@@ -75,9 +105,19 @@ public sealed record HostHistoryReset(IReadOnlyList<WireMessage> Messages)
     public string Type => "history.reset";
 }
 
+public sealed record HostHistoryLoading(bool Loading)
+{
+    public string Type => "history.loading";
+}
+
 public sealed record HostMessageAppend(WireMessage Message)
 {
     public string Type => "message.append";
+}
+
+public sealed record HostMessageUpdate(WireMessage Message)
+{
+    public string Type => "message.update";
 }
 
 public sealed record HostMessageDelta(string Id, string Text)

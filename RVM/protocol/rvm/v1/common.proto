@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_1 = 1;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  RVM_UNAVAILABLE = 1;
+  RVM_HCS_UNAVAILABLE = 2;
+  RVM_GUEST_UNREACHABLE = 3;
+  RVM_SESSION_NOT_FOUND = 4;
+  RVM_MASKED_FILE = 5;
+  RVM_PATH_OUT_OF_SCOPE = 6;
+  RVM_POLICY_DENIED = 7;
+  RVM_APPROVAL_REQUIRED = 8;
+  RVM_HASH_MISMATCH = 9;
+  RVM_SYNC_CONFLICT = 10;
+  RVM_BACKEND_FAILED = 11;
+  RVM_ENGINE_TIMEOUT = 12;
+  RVM_PROTOCOL_ERROR = 13;
+  RVM_NOT_IMPLEMENTED = 14;
+  RVM_INVALID_ARGUMENT = 15;
+  RVM_ALREADY_EXISTS = 16;
+  RVM_BUSY = 17;
+  RVM_INVALID_STATE = 18;
+  RVM_UNAUTHENTICATED = 19;
+  RVM_NOT_FOUND = 20;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  bool retryable = 3;
+  string detail = 4;
+}
+
+message Empty {}
+
+enum BackendKind {
+  BACKEND_KIND_UNSPECIFIED = 0;
+  BACKEND_KIND_HCS = 1;
+  BACKEND_KIND_SANDBOX = 2;
+}
+
+enum SandboxMode {
+  SANDBOX_MODE_UNSPECIFIED = 0;
+  SANDBOX_MODE_READ_ONLY = 1;
+  SANDBOX_MODE_WORKSPACE_WRITE = 2;
+  SANDBOX_MODE_DANGER_FULL_ACCESS = 3;
+}
+
+enum ApprovalMode {
+  APPROVAL_MODE_UNSPECIFIED = 0;
+  APPROVAL_MODE_ASK = 1;
+  APPROVAL_MODE_NEVER = 2;
+}
+
+message SandboxPolicy {
+  SandboxMode mode = 1;
+  repeated string writable_roots = 2;
+  bool network_access = 3;
+  ApprovalMode approval = 4;
+}
+
+message ContentHash {
+  string algorithm = 1;
+  bytes digest = 2;
+}
+
+message EnvironmentFacts {
+  string windows_build = 1;
+  bool vbs_enabled = 2;
+  bool hvci_enabled = 3;
+  uint32 memory_mb = 4;
+  uint32 vcpu_count = 5;
+  bool network_enabled = 6;
+}
+
+enum ProbeState {
+  PROBE_STATE_UNSPECIFIED = 0;
+  PROBE_STATE_OK = 1;
+  PROBE_STATE_FAILED = 2;
+  PROBE_STATE_NOT_PROBED = 3;
+}
+
+message ProbeResult {
+  ProbeState state = 1;
+  string detail = 2;
+}
+
+message AvailabilityReport {
+  ProbeResult appcontainer = 1;
+  ProbeResult winfsp = 2;
+  reserved 3, 6, 7, 8;
+  ProbeResult vbs = 4;
+  ProbeResult hvci = 5;
+  bool rvm_available = 9;
+  string reason = 10;
+}

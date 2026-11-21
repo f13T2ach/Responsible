@@ -25,6 +25,20 @@
                            HorizontalAlignment="Center"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
+            <StackPanel x:Name="FallbackLoading"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                <ui:ProgressRing Width="24" Height="24"
+                                 IsIndeterminate="True"
+                                 HorizontalAlignment="Center"
+                                 Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                <TextBlock Text="正在加载会话…"
+                           Margin="0,14,0,0"
+                           FontSize="13.5"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
             <ScrollViewer x:Name="FallbackScroll"
                           Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto"

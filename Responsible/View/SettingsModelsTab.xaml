@@ -39,7 +39,7 @@
                                            Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                                            Command="{Binding DataContext.DeleteProviderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                            CommandParameter="{Binding}"
-                                           Visibility="{Binding Kind, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=Custom}" />
+                                           Visibility="{Binding Kind, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=!Account}" />
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding Name}"

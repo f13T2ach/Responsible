@@ -2,6 +2,8 @@
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.DependencyInjection;
 using Responsible.ExView;
+using Responsible.MoeViews;
+using Responsible.MoeViews.Plugins;
 using Responsible.Services;
 using Responsible.View;
 using Responsible.ViewModel;
@@ -36,11 +38,18 @@ namespace Responsible
             services.AddSingleton<INavigationService, NavigationService>();
             services.AddSingleton<IModelCatalogService, ModelCatalogService>();
             services.AddSingleton<IWorkspaceChangeTracker, WorkspaceChangeTracker>();
+            services.AddSingleton<PluginOverridesStore>();
+            services.AddSingleton<IWorkspaceStore, WorkspaceStore>();
             services.AddSingleton<IChatSessionService, ChatSessionService>();
             services.AddSingleton<IDshKernelService, DshKernelService>();
+            services.AddSingleton<IMoeViewNavigator, MoeViewNavigator>();
+            services.AddSingleton<IDshPluginService, DshPluginService>();
             services.AddSingleton<IAppThemeService, AppThemeService>();
+            services.AddSingleton<IWinFspService, WinFspService>();
+            services.AddSingleton<IRvmEngineService, RvmEngineService>();
             services.AddSingleton<IContentDialogService, ContentDialogService>();
             services.AddSingleton<IProviderEditorService, ProviderEditorService>();
+            services.AddSingleton<IWorkspaceEditorService, WorkspaceEditorService>();
 
             services.AddSingleton<MainWindow>();
             services.AddSingleton<MainWindowViewModel>();
@@ -50,6 +59,10 @@ namespace Responsible
             services.AddTransient<SettingsExView>();
             services.AddTransient<ProviderEditorViewModel>();
             services.AddTransient<ProviderEditorView>();
+            services.AddTransient<WorkspaceEditorViewModel>();
+            services.AddTransient<WorkspaceEditorView>();
+            services.AddTransient<PluginsManagerViewModel>();
+            services.AddTransient<PluginsManagerView>();
         }
 
         protected override void OnExit(ExitEventArgs e)

@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using CommunityToolkit.Mvvm.Messaging;
+using Responsible.Messages;
 using Responsible.ViewModel;
 
 namespace Responsible.Services;
@@ -19,6 +21,9 @@ public sealed class ModelCatalogService : IModelCatalogService
 
     public ObservableCollection<ModelOptionViewModel> ModelOptions { get; } = [];
 
+    private IReadOnlyList<DshModelRow> _dshModels = [];
+    private readonly IMessenger _messenger;
+
     public IReadOnlyList<ProviderCatalogEntry> Catalog { get; } =
     [
         new("openai", "OpenAI", "OPENAI_API_KEY", [], ["GPT-5.2", "GPT-5.2-mini"]),
@@ -30,8 +35,9 @@ public sealed class ModelCatalogService : IModelCatalogService
         new("deepseek", "DeepSeek", "DEEPSEEK_API_KEY", [], ["DeepSeek-V4.1-Flash", "DeepSeek-V4-Pro"]),
     ];
 
-    public ModelCatalogService()
+    public ModelCatalogService(IMessenger messenger)
     {
+        _messenger = messenger;
         var records = Load();
         foreach (var record in records)
             Providers.Add(FromRecord(record));
@@ -82,24 +88,82 @@ public sealed class ModelCatalogService : IModelCatalogService
         Process.Start(new ProcessStartInfo(ConfigPath) { UseShellExecute = true });
     }
 
+    public void ApplyDshModels(IReadOnlyList<DshModelRow> models)
+    {
+        if (models.Count == 0) return;
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(() => ApplyDshModels(models));
+            return;
+        }
+
+        _dshModels = models;
+        RebuildModelOptions();
+    }
+
+    private static string LocalRoute(string providerId) =>
+        providerId == "deepseek" ? "deepseek-official" : providerId;
+
+    // DSH 内置目录用 kebab 模型 id；本机目录存的是展示名，发请求前必须先换回真实 id
+    private static string NormalizeModelId(string route, string id) => (route, id) switch
+    {
+        ("deepseek-official", "DeepSeek-V4.1-Flash") => "deepseek-flash",
+        ("deepseek-official", "DeepSeek-V4-Pro") => "deepseek-v4-pro",
+        _ => id,
+    };
+
     private void RebuildModelOptions()
     {
-        var selectedName = ModelOptions.FirstOrDefault(o => o.IsSelected)?.DisplayName;
+        var previous = ModelOptions.FirstOrDefault(o => o.IsSelected);
+        var selectedRoute = previous?.ProviderRoute;
+        var selectedId = previous?.ModelId;
+        var selectedName = previous?.DisplayName;
 
         ModelOptions.Clear();
+        var seen = new HashSet<(string Provider, string Model)>();
         foreach (var provider in Providers)
             foreach (var model in provider.Models)
-                if (!string.IsNullOrWhiteSpace(model.Id))
-                    ModelOptions.Add(new ModelOptionViewModel
-                    {
-                        ProviderName = provider.Name,
-                        DisplayName = model.Id,
-                    });
+            {
+                if (string.IsNullOrWhiteSpace(model.Id)) continue;
+                var route = LocalRoute(provider.Id);
+                // 同名同路由以 DSH 目录为准：本机条目只是本应用自己的旧目录
+                if (_dshModels.Any(m => m.ProviderId == route
+                        && (m.ModelId == model.Id || string.Equals(m.ModelName, model.Id, StringComparison.OrdinalIgnoreCase))))
+                    continue;
+                if (!seen.Add((route, model.Id))) continue;
+                ModelOptions.Add(new ModelOptionViewModel
+                {
+                    ProviderName = provider.Name,
+                    DisplayName = model.Id,
+                    ProviderRoute = route,
+                    ModelId = NormalizeModelId(route, model.Id),
+                });
+            }
 
-        var selected = ModelOptions.FirstOrDefault(o => o.DisplayName == selectedName)
-            ?? ModelOptions.FirstOrDefault();
+        // DSH 运行时注册的模型（含 pi-ai 目录）与本机 provider 目录合并，选择器不会因刷新丢项
+        foreach (var model in _dshModels)
+        {
+            if (!seen.Add((model.ProviderId, model.ModelId))) continue;
+            ModelOptions.Add(new ModelOptionViewModel
+            {
+                ProviderName = model.ProviderName,
+                DisplayName = model.ModelName,
+                ProviderRoute = model.ProviderId,
+                ModelId = model.ModelId,
+            });
+        }
+
+        var selected = ModelOptions.FirstOrDefault(o => o.ProviderRoute == selectedRoute && o.ModelId == selectedId)
+                       ?? ModelOptions.FirstOrDefault(o => o.DisplayName == selectedName)
+                       ?? ModelOptions.FirstOrDefault();
+        // 选择器里可能有 DSH 路由并不存在的本机条目；回落时保持 UI 与实际运行的模型一致
+        var dshRoutes = _dshModels.Select(model => model.ProviderId).ToHashSet(StringComparer.Ordinal);
+        if (selected is not null && dshRoutes.Count > 0 && !dshRoutes.Contains(selected.ProviderRoute))
+            selected = ModelOptions.FirstOrDefault(o => dshRoutes.Contains(o.ProviderRoute)) ?? selected;
         if (selected != null)
             selected.IsSelected = true;
+        _messenger.Send(new ModelOptionsChangedMessage());
     }
 
     private void Seed()

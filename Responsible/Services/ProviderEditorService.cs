@@ -6,11 +6,6 @@ using Wpf.Ui.Controls;
 
 namespace Responsible.Services;
 
-public interface IProviderEditorService
-{
-    Task EditAsync(ProviderViewModel? existing);
-}
-
 public sealed class ProviderEditorService(
     IContentDialogService dialogs,
     IModelCatalogService catalog,

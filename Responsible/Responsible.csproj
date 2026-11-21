@@ -16,8 +16,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Responsible.MoeViews\Responsible.MoeViews.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--  RWebView 构建产物：单文件 html，随输出目录部署供 WebView2 NavigateToString  -->
     <Content Include="..\RWebView\dist\index.html" Link="RWebView\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <!--  WinFsp 安装包：设置页“安装 WinFsp”使用，离线可装  -->
+    <Content Include="ThirdParty\WinFsp\winfsp-2.2.26323.msi" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

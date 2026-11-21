@@ -1,6 +1,18 @@
 import { build } from "esbuild";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 
+const replaceAsync = async (text, pattern, replacer) => {
+  const pieces = [];
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    pieces.push(text.slice(last, match.index));
+    pieces.push(await replacer(...match));
+    last = match.index + match[0].length;
+  }
+  pieces.push(text.slice(last));
+  return pieces.join("");
+};
+
 const js = await build({
   entryPoints: ["src/main.ts"],
   bundle: true,
@@ -19,10 +31,23 @@ const css = await build({
   legalComments: "none",
 });
 
+// KaTeX 字体内联成 data URI：页面用 NavigateToString 加载，没有可解析的相对资源路径
+const katexDir = "vendor/katex";
+let katexCss = await readFile(`${katexDir}/katex.min.css`, "utf8");
+katexCss = await replaceAsync(
+  katexCss,
+  /src:url\(fonts\/([^)]+\.woff2)\) format\("woff2"\),url\([^)]+\) format\("woff"\),url\([^)]+\) format\("truetype"\)/g,
+  async (_match, file) => {
+    const font = await readFile(`${katexDir}/fonts/${file}`);
+    return `src:url(data:font/woff2;base64,${font.toString("base64")}) format("woff2")`;
+  },
+);
+
+// 用函数式替换：替换串里的 $$、$& 等会被 String.replace 当成特殊模式
 const template = await readFile("src/index.html", "utf8");
 const html = template
-  .replace("/*__CSS__*/", css.outputFiles[0].text)
-  .replace("/*__JS__*/", js.outputFiles[0].text);
+  .replace("/*__CSS__*/", () => `${katexCss}\n${css.outputFiles[0].text}`)
+  .replace("/*__JS__*/", () => js.outputFiles[0].text);
 
 await mkdir("dist", { recursive: true });
 await writeFile("dist/index.html", html);

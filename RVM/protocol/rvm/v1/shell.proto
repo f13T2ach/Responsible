@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+import "rvm/v1/common.proto";
+
+enum ShellStream {
+  SHELL_STREAM_UNSPECIFIED = 0;
+  SHELL_STREAM_STDOUT = 1;
+  SHELL_STREAM_STDERR = 2;
+}
+
+message ShellExecRequest {
+  uint64 session_id = 1;
+  string command = 2;
+  string workdir = 3;
+  uint32 timeout_ms = 4;
+  bytes stdin_data = 5;
+  map<string, string> env = 6;
+  SandboxPolicy policy = 7;
+  uint32 stdout_max_bytes = 8;
+  string call_id = 9;
+  // Exact argv to spawn. Preferred over `command` when non-empty so callers
+  // never have to re-quote arguments; `command` remains the shell string form.
+  repeated string argv = 10;
+}
+
+message ShellExecStarted {
+  uint64 session_id = 1;
+  uint64 process_id = 2;
+  uint64 started_unix_ms = 3;
+}
+
+message ShellOutputChunk {
+  uint64 session_id = 1;
+  uint64 process_id = 2;
+  ShellStream stream = 3;
+  bytes data = 4;
+  uint64 sequence = 5;
+  bool truncated = 6;
+}
+
+message ShellSandboxFacts {
+  bool denied = 1;
+  string enforcement = 2;
+}
+
+message ShellExited {
+  uint64 session_id = 1;
+  uint64 process_id = 2;
+  bool has_exit_code = 3;
+  int32 exit_code = 4;
+  bool signaled = 5;
+  uint32 signal = 6;
+  bool timed_out = 7;
+  bool cancelled = 8;
+  uint64 duration_ms = 9;
+  ShellSandboxFacts sandbox = 10;
+  string error = 11;
+}
+
+message ShellKillRequest {
+  uint64 session_id = 1;
+  uint64 process_id = 2;
+  string reason = 3;
+}
+
+message ShellKillResponse {
+  bool killed = 1;
+}

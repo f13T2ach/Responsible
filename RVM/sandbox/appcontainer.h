@@ -1,0 +1,73 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "core/result.h"
+
+namespace rvm::sandbox {
+
+struct AppContainerProfile {
+  std::wstring name;
+  std::wstring sid;
+};
+
+core::Result<AppContainerProfile> CreateProfile(std::wstring_view name);
+core::Status DeleteProfile(std::wstring_view name);
+
+core::Status GrantDirectory(const std::wstring& sid, const std::wstring& path, bool write,
+                            bool inherit);
+core::Status RevokeDirectory(const std::wstring& sid, const std::wstring& path, bool inherit);
+core::Status GrantTraverseAncestors(const std::wstring& sid, const std::wstring& path,
+                                    std::vector<std::wstring>* granted);
+
+enum class Containment {
+  // Full AppContainer token. Requires a workspace the AppContainer can reach;
+  // WinFsp volumes currently reject AppContainer opens at the device layer
+  // (winfsp/winfsp#705), so mounts use kRestrictedToken instead.
+  kAppContainer,
+  // Restricted token (DISABLE_MAX_PRIVILEGE) inside a job object. Compatible
+  // with WinFsp volumes and common toolchains; DACL isolation is not applied.
+  kRestrictedToken,
+};
+
+struct ProcessOptions {
+  std::wstring command_line;
+  std::wstring working_directory;
+  std::wstring appcontainer_sid;
+  Containment containment = Containment::kAppContainer;
+  std::uint32_t timeout_ms = 120000;
+  std::uint64_t memory_limit_bytes = 0;
+  std::uint32_t max_processes = 0;
+  // Bytes written to the child's stdin before the channel closes.
+  std::vector<std::uint8_t> stdin_data;
+  // Environment for the child; empty inherits this process's environment.
+  std::vector<std::pair<std::wstring, std::wstring>> environment;
+  // Retained bytes per stream; bytes past the cap are dropped and flagged.
+  // 0 keeps everything. The sink still observes only retained bytes.
+  std::uint64_t max_output_bytes = 0;
+  // Receives every retained chunk; invoked serially from the capture threads.
+  std::function<void(bool stderr_stream, const std::uint8_t* data, std::size_t size)> sink;
+  // Polled while the child runs; returning true terminates the job early.
+  std::function<bool()> should_cancel;
+};
+
+struct ProcessResult {
+  std::uint32_t exit_code = 0;
+  std::uint32_t process_id = 0;
+  bool timed_out = false;
+  bool cancelled = false;
+  bool output_truncated = false;
+  bool error_truncated = false;
+  std::string output;
+  std::string error;
+};
+
+core::Result<ProcessResult> RunProcess(const ProcessOptions& options);
+
+}  // namespace rvm::sandbox

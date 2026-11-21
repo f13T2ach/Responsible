@@ -40,7 +40,8 @@
                     <Menu VerticalAlignment="Center" Background="Transparent" FontSize="13">
                         <ui:MenuItem Header="文件" Style="{StaticResource MoeToolbarMenuItemStyle}"
                                      Template="{StaticResource MoeTopLevelMenuItemTemplate}">
-                            <ui:MenuItem Header="新建对话" Icon="{ui:SymbolIcon Symbol=Add24}" />
+                            <ui:MenuItem Header="新建对话" Icon="{ui:SymbolIcon Symbol=Add24}"
+                                         Command="{Binding NewConversationCommand}" />
                             <ui:MenuItem Header="打开工作区" Icon="{ui:SymbolIcon Symbol=FolderOpen24}" />
                         </ui:MenuItem>
                         <ui:MenuItem Header="编辑" Style="{StaticResource MoeToolbarMenuItemStyle}"
@@ -165,9 +166,19 @@
                 <DockPanel>
                     <!--  上方：插件 / 自动化 / 安全  -->
                     <StackPanel DockPanel.Dock="Top" Margin="0,8,0,0">
-                        <ui:Button Style="{StaticResource MoeSidebarButtonStyle}"
-                                   Icon="{ui:SymbolIcon Symbol=PuzzlePiece24}"
-                                   Content="插件" />
+                        <ui:Button Icon="{ui:SymbolIcon Symbol=PuzzlePiece24}"
+                                   Content="插件"
+                                   Command="{Binding OpenPluginsCommand}">
+                            <ui:Button.Style>
+                                <Style TargetType="{x:Type ui:Button}" BasedOn="{StaticResource MoeSidebarButtonStyle}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsMoeViewOpen}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ui:Button.Style>
+                        </ui:Button>
                         <ui:Button Style="{StaticResource MoeSidebarButtonStyle}"
                                    Icon="{ui:SymbolIcon Symbol=Bot24}"
                                    Content="自动化" />
@@ -203,8 +214,16 @@
                                    Style="{StaticResource MoeToolbarIconButtonStyle}"
                                    Icon="{ui:SymbolIcon Symbol=Add24, FontSize=14}"
                                    Margin="0,0,10,0"
+                                   Command="{Binding CreateWorkspaceCommand}"
                                    ToolTip="新建工作区" />
                     </Grid>
+
+                    <TextBlock DockPanel.Dock="Top"
+                               Margin="16,6,16,2"
+                               FontSize="12"
+                               Text="正在加载会话…"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               Visibility="{Binding IsConversationsLoaded, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=!True}" />
 
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Workspaces}">
@@ -213,23 +232,110 @@
                                     <Expander Style="{StaticResource MoeWorkspaceExpanderStyle}"
                                               IsExpanded="{Binding IsExpanded}">
                                         <Expander.Header>
-                                            <StackPanel Orientation="Horizontal">
-                                                <ui:SymbolIcon Symbol="Folder24" FontSize="16"
-                                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                <TextBlock Text="{Binding Name}" Margin="8,0,0,0"
-                                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                                            </StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0"
+                                                            Orientation="Horizontal"
+                                                            VerticalAlignment="Center">
+                                                    <ui:SymbolIcon Symbol="Folder24" FontSize="16"
+                                                                   Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                    <TextBlock Text="{Binding Name}" Margin="8,0,0,0"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                </StackPanel>
+
+                                                <!--  行内操作：仅悬停或键盘聚焦时出现  -->
+                                                <StackPanel Grid.Column="1"
+                                                            Orientation="Horizontal"
+                                                            VerticalAlignment="Center"
+                                                            Margin="6,0,0,0">
+                                                    <StackPanel.Style>
+                                                        <Style TargetType="{x:Type StackPanel}">
+                                                            <Setter Property="Opacity" Value="0" />
+                                                            <Setter Property="IsHitTestVisible" Value="False" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="True">
+                                                                    <Setter Property="Opacity" Value="1" />
+                                                                    <Setter Property="IsHitTestVisible" Value="True" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ToggleButton}}" Value="True">
+                                                                    <Setter Property="Opacity" Value="1" />
+                                                                    <Setter Property="IsHitTestVisible" Value="True" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </StackPanel.Style>
+                                                    <ui:DropDownButton Appearance="Transparent"
+                                                                       BorderThickness="0"
+                                                                       Padding="3"
+                                                                       VerticalAlignment="Center"
+                                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                                       Icon="{ui:SymbolIcon Symbol=MoreHorizontal24, FontSize=14}"
+                                                                       ToolTip="工作区菜单">
+                                                        <ui:DropDownButton.Flyout>
+                                                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                                <ui:MenuItem Header="新建对话"
+                                                                             Icon="{ui:SymbolIcon Symbol=Add24}"
+                                                                             Command="{Binding NewConversationCommand}" />
+                                                                <ui:MenuItem Header="在资源管理器中打开"
+                                                                             Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
+                                                                             Command="{Binding OpenFolderCommand}" />
+                                                                <Separator />
+                                                                <ui:MenuItem Header="从侧栏移除"
+                                                                             Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"
+                                                                             Command="{Binding RemoveFromSidebarCommand}"
+                                                                             Visibility="{Binding IsCustom, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                            </ContextMenu>
+                                                        </ui:DropDownButton.Flyout>
+                                                    </ui:DropDownButton>
+                                                    <ui:Button Style="{StaticResource MoeWorkspaceActionButtonStyle}"
+                                                               Icon="{ui:SymbolIcon Symbol=Add24, FontSize=14}"
+                                                               Command="{Binding NewConversationCommand}"
+                                                               ToolTip="在此工作区新建对话" />
+                                                </StackPanel>
+                                            </Grid>
                                         </Expander.Header>
                                         <ListBox Style="{StaticResource MoeConversationListStyle}"
                                                  ItemsSource="{Binding Conversations}"
-                                                 SelectedItem="{Binding DataContext.SelectedConversation, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                                 MouseLeftButtonUp="OnConversationClicked">
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate DataType="{x:Type vm:ConversationItemViewModel}">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <ui:SymbolIcon Symbol="Chat24" FontSize="14" />
-                                                        <TextBlock Text="{Binding Title}" Margin="8,0,0,0"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                    </StackPanel>
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <ui:SymbolIcon Symbol="Chat24" FontSize="14" />
+                                                            <TextBlock Text="{Binding Title}" Margin="8,0,0,0"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                        <ui:Button Grid.Column="1"
+                                                                   Icon="{ui:SymbolIcon Symbol=DeleteDismiss24, FontSize=13}"
+                                                                   Command="{Binding DataContext.DeleteConversationCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                   CommandParameter="{Binding}"
+                                                                   ToolTip="删除对话">
+                                                            <ui:Button.Style>
+                                                                <Style TargetType="{x:Type ui:Button}"
+                                                                       BasedOn="{StaticResource MoeWorkspaceActionButtonStyle}">
+                                                                    <Setter Property="Visibility"
+                                                                            Value="{Binding CanDelete, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                                    <Setter Property="Opacity" Value="0" />
+                                                                    <Setter Property="IsHitTestVisible" Value="False" />
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}"
+                                                                                     Value="True">
+                                                                            <Setter Property="Opacity" Value="1" />
+                                                                            <Setter Property="IsHitTestVisible" Value="True" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </ui:Button.Style>
+                                                        </ui:Button>
+                                                    </Grid>
                                                 </DataTemplate>
                                             </ListBox.ItemTemplate>
                                         </ListBox>
@@ -272,26 +378,46 @@
                                     <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorSecondaryBrush}" />
                                     <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
                                 </DataTrigger>
+                                <DataTrigger Binding="{Binding IsMoeViewOpen}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsSessionLoading}" Value="True">
+                                    <Setter Property="IsEnabled" Value="False" />
+                                    <Setter Property="Opacity" Value="0.55" />
+                                </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </Border.Style>
                     <DockPanel>
                         <Grid DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                            <ui:DropDownButton HorizontalAlignment="Left"
-                                               Appearance="Transparent"
-                                               BorderThickness="0"
-                                               Icon="{ui:SymbolIcon Symbol=Add24}"
-                                               ToolTip="添加内容">
-                                <ui:DropDownButton.Flyout>
-                                    <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                        <ui:MenuItem Header="添加文件" Icon="{ui:SymbolIcon Symbol=Document24}" />
-                                        <ui:MenuItem Header="添加图片" Icon="{ui:SymbolIcon Symbol=Image24}" />
-                                        <ui:MenuItem Header="添加对话" Icon="{ui:SymbolIcon Symbol=Chat24}" />
-                                        <Separator />
-                                        <ui:MenuItem Header="调用指令" Icon="{ui:SymbolIcon Symbol=WindowDevTools24}" />
-                                    </ContextMenu>
-                                </ui:DropDownButton.Flyout>
-                            </ui:DropDownButton>
+                            <StackPanel HorizontalAlignment="Left" Orientation="Horizontal">
+                                <ui:DropDownButton Appearance="Transparent"
+                                                   BorderThickness="0"
+                                                   Icon="{ui:SymbolIcon Symbol=Add24}"
+                                                   ToolTip="添加内容">
+                                    <ui:DropDownButton.Flyout>
+                                        <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                            <ui:MenuItem Header="添加文件" Icon="{ui:SymbolIcon Symbol=Document24}" />
+                                            <ui:MenuItem Header="添加图片" Icon="{ui:SymbolIcon Symbol=Image24}" />
+                                            <ui:MenuItem Header="添加对话" Icon="{ui:SymbolIcon Symbol=Chat24}" />
+                                            <Separator />
+                                            <ui:MenuItem Header="调用指令" Icon="{ui:SymbolIcon Symbol=WindowDevTools24}" />
+                                        </ContextMenu>
+                                    </ui:DropDownButton.Flyout>
+                                </ui:DropDownButton>
+                                <!--  DSH 的 conversation.input.permission：沙箱模式 + 审批策略，输入框下方靠左  -->
+                                <controls:PermissionDropMenu Margin="6,0,0,0"
+                                                             VerticalAlignment="Center"
+                                                             ItemsSource="{Binding PermissionOptions}"
+                                                             CurrentLabel="{Binding PermissionLabel}"
+                                                             CurrentIcon="{Binding PermissionIcon}"
+                                                             CurrentHasIcon="{Binding PermissionHasIcon}"
+                                                             CurrentDescription="{Binding PermissionDescription}"
+                                                             CurrentIsDangerous="{Binding PermissionIsDangerous}"
+                                                             CurrentIsRvmProtection="{Binding PermissionIsRvmProtection}"
+                                                             SelectCommand="{Binding SelectPermissionCommand}"
+                                                             Visibility="{Binding IsPermissionAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </StackPanel>
                             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                                 <controls:ModelsDropMenu ItemsSource="{Binding ModelOptions}"
                                                          SelectedItem="{Binding SelectedModelOption, Mode=TwoWay}"
@@ -319,13 +445,33 @@
                                 </TextBox.InputBindings>
                             </TextBox>
                             <TextBlock Text="发消息或创建任务，/ 调用指令，@ 文件或对话"
+                                       FontSize="14"
+                                       VerticalAlignment="Top">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource MoePlaceholderTextStyle}">
+                                        <Setter Property="Visibility"
+                                                Value="{Binding Text, ElementName=PromptBox, Converter={StaticResource EmptyStringToVisibilityConverter}}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsSessionLoading}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="正在加载会话…"
                                        Style="{StaticResource MoePlaceholderTextStyle}"
                                        FontSize="14"
                                        VerticalAlignment="Top"
-                                       Visibility="{Binding Text, ElementName=PromptBox, Converter={StaticResource EmptyStringToVisibilityConverter}}" />
+                                       Visibility="{Binding IsSessionLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         </Grid>
                     </DockPanel>
                 </Border>
+
+                <!--  Moe 内容区页面：整块覆盖历史区与输入区（WebView2 已在打开期间折叠，规避空域）  -->
+                <controls:MoeViewHost Grid.RowSpan="2"
+                                      Panel.ZIndex="10"
+                                      Background="{DynamicResource ApplicationBackgroundBrush}" />
                 </Grid>
             </Border>
         </Grid>
@@ -354,6 +500,13 @@
             <TextBlock Style="{StaticResource MoeStatusTextStyle}"
                        Text="{Binding ContextUsagePercent, StringFormat={}{0}% 上下文}"
                        ToolTip="上下文容量占用" />
+            <StackPanel Orientation="Horizontal"
+                        ToolTip="{Binding WorkspaceBadgeDetail}"
+                        Visibility="{Binding IsWorkspaceBadgeVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="·" Margin="10,0" />
+                <ui:SymbolIcon Symbol="Shield24" Style="{StaticResource MoeStatusIconStyle}" Margin="4,0,2,0" />
+                <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="{Binding WorkspaceBadge}" />
+            </StackPanel>
         </StackPanel>
     </Grid>
 </UserControl>

@@ -5,16 +5,6 @@ using System.Text;
 
 namespace Responsible.Services;
 
-public sealed record ChangedFile(string Path, string Display, int Added, int Deleted, bool Binary, bool Oversized);
-
-public sealed record ChatChanges(int Turn, string Cwd, int Total, int Added, int Deleted, IReadOnlyList<ChangedFile> Files);
-
-public interface IWorkspaceChangeTracker
-{
-    Task BeginAsync(string cwd, int turn);
-    Task<ChatChanges?> EndAsync();
-}
-
 // 按 turn 采集工作区改动：用临时 index/对象库在 turn 起止各写一棵 tree，再 diff --numstat。
 // 仓库自身的 index、对象和工作区不被写入；非 git 目录直接跳过（不生成卡片）。
 public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker

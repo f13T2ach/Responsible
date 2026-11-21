@@ -19,6 +19,7 @@
             <conv:EmptyStringToVisibilityConverter x:Key="EmptyStringToVisibilityConverter" />
             <conv:FractionConverter x:Key="FractionConverter" />
             <conv:EqualityToVisibilityConverter x:Key="EqualityToVisibilityConverter" />
+            <conv:NonEmptyStringToVisibilityConverter x:Key="NonEmptyStringToVisibilityConverter" />
 
             <!--  VM → View 映射：ViewFrame 只持有 ViewModel，视图由模板解析  -->
             <DataTemplate DataType="{x:Type vm:MoeViewModel}">
@@ -89,6 +90,25 @@
                 <Setter Property="Margin" Value="2,0" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+
+            <!--  工作区行内的“更多 / 新建对话”：悬停或聚焦时才出现  -->
+            <Style x:Key="MoeWorkspaceActionButtonStyle" TargetType="{x:Type ui:Button}" BasedOn="{StaticResource MoeFlatButtonStyle}">
+                <Setter Property="Padding" Value="4" />
+                <Setter Property="Margin" Value="1,0" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+
+            <!--  新建工作区的源文件夹虚线区  -->
+            <Style x:Key="MoeDropZoneStyle" TargetType="{x:Type Rectangle}">
+                <Setter Property="Stroke" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                <Setter Property="StrokeThickness" Value="1" />
+                <Setter Property="StrokeDashArray" Value="4 3" />
+                <Setter Property="RadiusX" Value="8" />
+                <Setter Property="RadiusY" Value="8" />
+                <Setter Property="Fill" Value="Transparent" />
+                <Setter Property="SnapsToDevicePixels" Value="True" />
             </Style>
 
             <!--  顶层菜单自绘紧凑模板。必须以局部值赋给 MenuItem.Template：
@@ -239,10 +259,10 @@
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
                                 </Trigger>
-                                <Trigger Property="IsSelected" Value="True">
+                                <DataTrigger Binding="{Binding IsActive}" Value="True">
                                     <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
                                     <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-                                </Trigger>
+                                </DataTrigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>

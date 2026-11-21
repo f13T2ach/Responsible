@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+import "rvm/v1/common.proto";
+
+enum ChangeKind {
+  CHANGE_KIND_UNSPECIFIED = 0;
+  CHANGE_KIND_ADDED = 1;
+  CHANGE_KIND_MODIFIED = 2;
+  CHANGE_KIND_DELETED = 3;
+  CHANGE_KIND_RENAMED = 4;
+}
+
+message FileChange {
+  string path = 1;
+  ChangeKind kind = 2;
+  ContentHash before_hash = 3;
+  ContentHash after_hash = 4;
+  uint64 added_bytes = 5;
+  uint64 removed_bytes = 6;
+}
+
+message DiffRequest {
+  uint64 session_id = 1;
+}
+
+message DiffResponse {
+  repeated FileChange changes = 1;
+}
+
+message SyncConflict {
+  string path = 1;
+  string reason = 2;
+}
+
+message ApplyRequest {
+  uint64 session_id = 1;
+  repeated string paths = 2;
+  bool all = 3;
+}
+
+message ApplyResponse {
+  repeated FileChange applied = 1;
+  repeated SyncConflict conflicts = 2;
+}
+
+message RollbackRequest {
+  uint64 session_id = 1;
+}
+
+message RollbackResponse {
+  bool rolled_back = 1;
+}

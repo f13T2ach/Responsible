@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package rvm.v1;
+
+import "rvm/v1/common.proto";
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_CREATING = 1;
+  SESSION_STATE_READY = 2;
+  SESSION_STATE_STOPPING = 3;
+  SESSION_STATE_CLOSED = 4;
+  SESSION_STATE_FAILED = 5;
+}
+
+message CreateSessionRequest {
+  string client_id = 1;
+  string workspace_root = 2;
+  repeated string masked_patterns = 3;
+  SandboxPolicy policy = 4;
+  uint32 memory_mb = 5;
+  uint32 vcpu_count = 6;
+  bool network_access = 7;
+  bool prewarm = 8;
+  bool overlay_workspace = 9;
+  string overlay_drive = 10;
+  // Stable per-workspace storage name (`<workspace>_<id>`); empty keeps the
+  // legacy per-session scratch directory.
+  string storage_key = 11;
+}
+
+message Session {
+  uint64 session_id = 1;
+  string workspace_root = 2;
+  BackendKind backend = 3;
+  SessionState state = 4;
+  uint64 created_unix_ms = 5;
+  EnvironmentFacts environment = 6;
+  string virtual_workspace_root = 7;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+message CloseSessionRequest {
+  uint64 session_id = 1;
+  bool keep_diff = 2;
+  string reason = 3;
+}
+
+message CloseSessionResponse {
+  bool closed = 1;
+}
+
+message GetSessionRequest {
+  uint64 session_id = 1;
+}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
