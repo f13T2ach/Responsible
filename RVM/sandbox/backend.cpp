@@ -37,6 +37,14 @@ std::wstring ProfileNameFor(const std::wstring& session_id) {
   return name;
 }
 
+std::wstring PackageFolderName(const std::wstring& profile_name) {
+  std::wstring folder = profile_name;
+  for (wchar_t& ch : folder) {
+    if (ch >= L'A' && ch <= L'Z') ch = static_cast<wchar_t>(ch - L'A' + L'a');
+  }
+  return folder;
+}
+
 bool IsAbsolutePath(const std::wstring& path) {
   if (path.size() < 3) return false;
   if (!std::iswalpha(static_cast<wint_t>(path[0]))) return false;
@@ -209,6 +217,13 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     const fs::path home = fs::path(temp_root_) / L"home";
     if (!temp_error) fs::create_directories(home / L"AppData" / L"Local", temp_error);
     if (!temp_error) fs::create_directories(home / L"AppData" / L"Roaming", temp_error);
+    // The AppContainer identity rewrites TEMP/TMP/LOCALAPPDATA to its package
+    // folder under LOCALAPPDATA. That folder must exist and be inside the
+    // granted temp tree, otherwise $env:TEMP points at a missing path.
+    const fs::path package_temp =
+        home / L"AppData" / L"Local" / L"Packages" / PackageFolderName(profile_.name) / L"AC" /
+        L"Temp";
+    if (!temp_error) fs::create_directories(package_temp, temp_error);
     if (temp_error) {
       StopProfile();
       phase_ = runtime::EnvironmentPhase::kFailed;
@@ -241,13 +256,6 @@ class SandboxEnvironment final : public runtime::IEnvironment {
         return temp.error();
       }
       granted_directories_.push_back(temp_root_);
-      const core::Status temp_ancestors =
-          GrantTraverseAncestors(profile_.sid, temp_root_, &granted_ancestors_);
-      if (!temp_ancestors.ok()) {
-        core::LogWarn("sandbox", "could not grant traverse rights to the temp ancestors: " +
-                                     temp_ancestors.error().message + " " +
-                                     temp_ancestors.error().detail);
-      }
     } else {
       core::Status granted = GrantDirectory(profile_.sid, spec_.workspace_root, write, true);
       if (!granted.ok()) {
@@ -264,13 +272,6 @@ class SandboxEnvironment final : public runtime::IEnvironment {
         return temp.error();
       }
       granted_directories_.push_back(temp_root_);
-
-      const core::Status ancestors =
-          GrantTraverseAncestors(profile_.sid, spec_.workspace_root, &granted_ancestors_);
-      if (!ancestors.ok()) {
-        core::LogWarn("sandbox", "could not grant traverse rights to every ancestor: " +
-                                     ancestors.error().message + " " + ancestors.error().detail);
-      }
 
       const core::Status reachable = VerifyWorkspaceAccess(write);
       if (!reachable.ok()) {
@@ -295,11 +296,6 @@ class SandboxEnvironment final : public runtime::IEnvironment {
       if (std::find(granted_directories_.begin(), granted_directories_.end(), tool) !=
           granted_directories_.end()) {
         continue;
-      }
-      const core::Status ancestors = GrantTraverseAncestors(profile_.sid, tool, &granted_ancestors_);
-      if (!ancestors.ok()) {
-        core::LogWarn("sandbox", "could not grant traverse rights to a tool directory: " +
-                                     ancestors.error().message + " " + ancestors.error().detail);
       }
       const core::Status granted = GrantDirectoryReadExecute(profile_.sid, tool, true);
       if (!granted.ok()) {
@@ -356,6 +352,13 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     facts.restricted_token = false;
     facts.exposed_environment = spec_.exposed_environment;
     facts.tool_paths = spec_.tool_paths;
+    for (const runtime::ToolAccess& tool : spec_.tools) {
+      const bool listed =
+          std::any_of(facts.tool_paths.begin(), facts.tool_paths.end(),
+                      [&](const std::wstring& path) { return path == tool.path; });
+      if (!listed) facts.tool_paths.push_back(tool.path);
+    }
+    facts.tools = spec_.tools;
     core::LogInfo("sandbox", "sandbox environment ready");
     return facts;
   }
@@ -368,14 +371,6 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     phase_ = runtime::EnvironmentPhase::kStopping;
     core::Status result = core::Status::Ok();
     UnmountOverlay();
-    for (auto it = granted_ancestors_.rbegin(); it != granted_ancestors_.rend(); ++it) {
-      const core::Status revoked = RevokeDirectory(profile_.sid, *it, false);
-      if (!revoked.ok()) {
-        core::LogWarn("sandbox", revoked.error().message);
-        result = revoked;
-      }
-    }
-    granted_ancestors_.clear();
     for (auto it = granted_directories_.rbegin(); it != granted_directories_.rend(); ++it) {
       const core::Status revoked = RevokeDirectory(profile_.sid, *it, true);
       if (!revoked.ok()) {
@@ -592,7 +587,6 @@ class SandboxEnvironment final : public runtime::IEnvironment {
   runtime::EnvironmentSpec spec_;
   AppContainerProfile profile_;
   std::vector<std::wstring> granted_directories_;
-  std::vector<std::wstring> granted_ancestors_;
   std::wstring overlay_session_root_;
   bool overlay_root_persistent_ = false;
   std::wstring temp_root_;

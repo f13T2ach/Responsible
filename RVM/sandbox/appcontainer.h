@@ -20,6 +20,11 @@ struct AppContainerProfile {
 core::Result<AppContainerProfile> CreateProfile(std::wstring_view name);
 core::Status DeleteProfile(std::wstring_view name);
 
+// Stable capability SID derived from a name. Grants on tool directories use
+// this SID so they survive engine restarts; only processes whose token lists
+// the capability can use them.
+core::Result<std::wstring> DeriveCapabilitySid(std::wstring_view name);
+
 core::Status GrantDirectory(const std::wstring& sid, const std::wstring& path, bool write,
                             bool inherit);
 // Read/execute only: used for user-exposed tool directories so a sandboxed
@@ -44,6 +49,9 @@ struct ProcessOptions {
   std::wstring command_line;
   std::wstring working_directory;
   std::wstring appcontainer_sid;
+  // Capability SIDs added to the child token (S-1-15-3-*). Persistent tool
+  // grants target these so a session only sees the tools the host selected.
+  std::vector<std::wstring> capabilities;
   Containment containment = Containment::kAppContainer;
   std::uint32_t timeout_ms = 120000;
   std::uint64_t memory_limit_bytes = 0;

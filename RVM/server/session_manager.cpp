@@ -1,7 +1,10 @@
 #include "server/session_manager.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cwctype>
+#include <filesystem>
 #include <utility>
 
 #include "channel/convert.h"
@@ -18,12 +21,38 @@ constexpr std::uint32_t kMaxVcpuCount = 64;
 constexpr std::size_t kMaxExposedEnvironment = 64;
 constexpr std::size_t kMaxExposedEnvironmentChars = 64 * 1024;
 constexpr std::size_t kMaxToolPaths = 32;
+constexpr std::size_t kMaxAuthorizedTools = 64;
+constexpr wchar_t kCapabilityPrefix[] = L"S-1-15-3-";
 
 std::uint64_t NowUnixMs() {
   return static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
+}
+
+std::wstring NormalizeToolPath(std::wstring path) {
+  for (wchar_t& ch : path) {
+    if (ch == L'/') ch = L'\\';
+  }
+  while (path.size() > 3 && path.back() == L'\\') path.pop_back();
+  return path;
+}
+
+bool SameToolPath(const std::wstring& left, const std::wstring& right) {
+  if (left.size() != right.size()) return false;
+  for (std::size_t i = 0; i < left.size(); ++i) {
+    if (std::towlower(left[i]) != std::towlower(right[i])) return false;
+  }
+  return true;
+}
+
+bool IsAbsoluteToolPath(const std::wstring& path) {
+  return std::filesystem::path(path).is_absolute();
+}
+
+bool IsCapabilitySid(const std::wstring& sid) {
+  return sid.rfind(kCapabilityPrefix, 0) == 0;
 }
 
 bool IsReservedDeviceName(const std::wstring& name) {
@@ -175,6 +204,47 @@ core::Result<v1::Session> SessionManager::Create(const v1::CreateSessionRequest&
     spec.tool_paths.push_back(std::move(decoded.value()));
   }
 
+  if (static_cast<std::size_t>(request.tool_access_size()) > kMaxToolPaths) {
+    return core::Error(core::ErrorCode::kInvalidArgument, "too many session tools");
+  }
+  for (const v1::ToolAccess& entry : request.tool_access()) {
+    auto path = channel::FromUtf8(entry.path());
+    if (!path.ok()) return path.error();
+    auto sid = channel::FromUtf8(entry.capability_sid());
+    if (!sid.ok()) return sid.error();
+    const std::wstring normalized = NormalizeToolPath(path.value());
+    if (!IsAbsoluteToolPath(normalized) || !IsCapabilitySid(sid.value())) {
+      return core::Error(core::ErrorCode::kInvalidArgument,
+                         "session tools need an absolute path and a capability SID");
+    }
+    std::error_code error;
+    if (!std::filesystem::is_directory(normalized, error) || error) {
+      return core::Error(core::ErrorCode::kNotFound,
+                         "a session tool directory does not exist", false,
+                         std::string(normalized.begin(), normalized.end()));
+    }
+    const bool authorized =
+        std::any_of(authorized_tools_.begin(), authorized_tools_.end(),
+                    [&](const runtime::ToolAccess& tool) {
+                      return SameToolPath(tool.path, normalized) &&
+                             tool.capability_sid == sid.value();
+                    });
+    if (!authorized) {
+      return core::Error(core::ErrorCode::kPolicyDenied,
+                         "the user has not authorized this tool", false,
+                         std::string(normalized.begin(), normalized.end()));
+    }
+    const bool duplicate =
+        std::any_of(spec.tools.begin(), spec.tools.end(), [&](const runtime::ToolAccess& tool) {
+          return SameToolPath(tool.path, normalized);
+        });
+    if (duplicate) {
+      return core::Error(core::ErrorCode::kInvalidArgument,
+                         "the same tool directory was selected twice");
+    }
+    spec.tools.push_back({normalized, sid.value()});
+  }
+
   auto environment = backend_.Create(spec);
   if (!environment.ok()) return environment.error();
 
@@ -221,6 +291,42 @@ core::Result<v1::Session> SessionManager::Create(const v1::CreateSessionRequest&
 
   sessions_.emplace(session_id, Entry{record, facts.value(), spec.workspace_root, environment.Take()});
   return record;
+}
+
+core::Status SessionManager::SetAuthorizedTools(
+    const v1::SetToolAuthorizationsRequest& request) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (static_cast<std::size_t>(request.tools_size()) > kMaxAuthorizedTools) {
+    return core::Status::Failure(
+        core::Error(core::ErrorCode::kInvalidArgument, "too many authorized tools"));
+  }
+  std::vector<runtime::ToolAccess> next;
+  next.reserve(static_cast<std::size_t>(request.tools_size()));
+  for (const v1::ToolAccess& entry : request.tools()) {
+    auto path = channel::FromUtf8(entry.path());
+    if (!path.ok()) return path.error();
+    auto sid = channel::FromUtf8(entry.capability_sid());
+    if (!sid.ok()) return sid.error();
+    const std::wstring normalized = NormalizeToolPath(path.value());
+    if (!IsAbsoluteToolPath(normalized) || !IsCapabilitySid(sid.value())) {
+      return core::Status::Failure(core::Error(
+          core::ErrorCode::kInvalidArgument,
+          "authorized tools need an absolute path and a capability SID"));
+    }
+    if (std::any_of(next.begin(), next.end(), [&](const runtime::ToolAccess& tool) {
+          return SameToolPath(tool.path, normalized);
+        })) {
+      return core::Status::Failure(
+          core::Error(core::ErrorCode::kInvalidArgument,
+                      "an authorized tool path is listed twice"));
+    }
+    next.push_back({normalized, sid.value()});
+  }
+  authorized_tools_ = std::move(next);
+  core::LogDebug("session", "authorized tools updated: " +
+                                std::to_string(authorized_tools_.size()));
+  return core::Status::Ok();
 }
 
 core::Status SessionManager::Close(std::uint64_t session_id, const std::string& reason) {
@@ -279,6 +385,7 @@ core::Result<ShellContext> SessionManager::DescribeForShell(std::uint64_t sessio
   context.restricted_token = found->second.facts.restricted_token;
   context.exposed_environment = found->second.facts.exposed_environment;
   context.tool_paths = found->second.facts.tool_paths;
+  context.tools = found->second.facts.tools;
   return context;
 }
 

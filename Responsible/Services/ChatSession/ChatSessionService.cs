@@ -25,6 +25,7 @@ public sealed partial class ChatSessionService : IChatSessionService
     private readonly IRvmEngineService _rvm;
     private readonly IWinFspService _winFsp;
     private readonly IWorkspaceStore _workspaceStore;
+    private readonly IAclAuthorizationService _acl;
     private ulong _rvmSessionId;
     private string? _rvmWorkspaceRoot;
     private string? _rvmVirtualRoot;
@@ -70,7 +71,8 @@ public sealed partial class ChatSessionService : IChatSessionService
         IWorkspaceChangeTracker changeTracker,
         IRvmEngineService rvm,
         IWinFspService winFsp,
-        IWorkspaceStore workspaceStore)
+        IWorkspaceStore workspaceStore,
+        IAclAuthorizationService acl)
     {
         _messenger = messenger;
         _kernel = kernel;
@@ -79,6 +81,7 @@ public sealed partial class ChatSessionService : IChatSessionService
         _rvm = rvm;
         _winFsp = winFsp;
         _workspaceStore = workspaceStore;
+        _acl = acl;
         _restoredSessionId = LoadState();
         if (!string.IsNullOrEmpty(_restoredSessionId))
         {

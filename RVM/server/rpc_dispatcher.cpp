@@ -315,6 +315,15 @@ core::Result<DispatchResult> RpcDispatcher::Handle(std::span<const std::uint8_t>
       if (!stream(exit_frame).ok()) return core::Ok(DispatchResult{{}, true});
       return core::Ok(DispatchResult{{}, false});
     }
+    case v1::RpcRequest::kSetToolAuthorizations: {
+      if (sessions_ == nullptr) return ErrorResult(request_id, UnsupportedRequest(engine_));
+      const core::Status applied =
+          sessions_->SetAuthorizedTools(rpc.set_tool_authorizations());
+      if (!applied.ok()) return ErrorResult(request_id, applied.error());
+      v1::RpcResponse response = BaseResponse(request_id);
+      response.mutable_empty();
+      return ResponseResult(std::move(response));
+    }
     case v1::RpcRequest::kShellKill:
       return ErrorResult(request_id, core::NotImplemented(
                                          "shell_kill is not implemented; cancel by closing "

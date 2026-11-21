@@ -15,6 +15,8 @@ public sealed class FolderItemViewModel(string path)
 
 public partial class WorkspaceEditorViewModel : ObservableObject
 {
+    public WorkspaceEditorViewModel(IAclAuthorizationService acl) => RvmSettings = new(acl);
+
     public IReadOnlyList<string> LocationOptions { get; } = ["此电脑"];
 
     [ObservableProperty]
@@ -39,7 +41,7 @@ public partial class WorkspaceEditorViewModel : ObservableObject
 
     public bool HasError => !string.IsNullOrEmpty(ErrorText);
 
-    public RvmSettingsViewModel RvmSettings { get; } = new();
+    public RvmSettingsViewModel RvmSettings { get; }
 
     partial void OnRvmProtectionChanged(bool value)
     {

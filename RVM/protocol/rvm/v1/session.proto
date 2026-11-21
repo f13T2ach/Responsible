@@ -35,9 +35,23 @@ message CreateSessionRequest {
   // Environment variables the user chose to expose to sandboxed processes.
   // The engine builds the rest of the child environment itself.
   repeated ExposedVariable exposed_environment = 12;
-  // Tool directories the user explicitly exposes. The engine grants the
-  // sandbox identity read/execute on these paths and prepends them to PATH.
+  // Legacy per-session tool grants. New hosts authorize tools once in the
+  // global ACL list and send tool_access instead.
   repeated string tool_paths = 13;
+  // Tools selected for this session. The capability SID already carries the
+  // persistent ACL grant; the engine only verifies it against the user's
+  // authorized list and adds the capability to child tokens.
+  repeated ToolAccess tool_access = 14;
+}
+
+message ToolAccess {
+  string path = 1;
+  string capability_sid = 2;
+  string name = 3;
+}
+
+message SetToolAuthorizationsRequest {
+  repeated ToolAccess tools = 1;
 }
 
 message Session {

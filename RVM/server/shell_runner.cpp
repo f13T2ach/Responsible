@@ -44,9 +44,59 @@ std::wstring NormalizeSeparators(std::wstring path) {
 }
 
 bool IsUnder(const std::wstring& root, const std::wstring& path) {
-  if (path.size() < root.size()) return false;
+  if (root.empty() || path.size() < root.size()) return false;
   if (ToLower(path.substr(0, root.size())) != ToLower(root)) return false;
   return path.size() == root.size() || path[root.size()] == L'\\' || path[root.size()] == L'/';
+}
+
+std::wstring TrimPathEntry(const std::wstring& value) {
+  std::size_t begin = 0;
+  std::size_t end = value.size();
+  while (begin < end && (value[begin] == L' ' || value[begin] == L'\t')) ++begin;
+  while (end > begin && (value[end - 1] == L' ' || value[end - 1] == L'\t')) --end;
+  std::wstring entry = value.substr(begin, end - begin);
+  if (entry.size() >= 2 && entry.front() == L'"' && entry.back() == L'"') {
+    entry = entry.substr(1, entry.size() - 2);
+  }
+  return entry;
+}
+
+// Only drive-rooted local directories may be appended from the host PATH.
+// Relative or UNC entries would change binary resolution, and the workspace or
+// session temp must never shadow host tools.
+bool IsAppendableHostPath(const std::wstring& entry) {
+  if (entry.size() < 3) return false;
+  const wchar_t drive = entry[0];
+  if (!((drive >= L'A' && drive <= L'Z') || (drive >= L'a' && drive <= L'z'))) return false;
+  if (entry[1] != L':' || (entry[2] != L'\\' && entry[2] != L'/')) return false;
+  if (entry.find(L'"') != std::wstring::npos) return false;
+  const DWORD attributes = GetFileAttributesW(entry.c_str());
+  return attributes != INVALID_FILE_ATTRIBUTES &&
+         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+void AppendHostPath(const std::wstring& host_path, const std::wstring& workspace_path,
+                    const std::wstring& host_workspace_root, const std::wstring& temp_path,
+                    std::vector<std::wstring>& entries) {
+  std::size_t start = 0;
+  while (start <= host_path.size()) {
+    const std::size_t end = host_path.find(L';', start);
+    const std::wstring raw =
+        host_path.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+    start = end == std::wstring::npos ? host_path.size() + 1 : end + 1;
+
+    std::wstring entry = NormalizeSeparators(TrimPathEntry(raw));
+    if (!IsAppendableHostPath(entry)) continue;
+    if (IsUnder(workspace_path, entry) || IsUnder(host_workspace_root, entry) ||
+        IsUnder(temp_path, entry)) {
+      continue;
+    }
+    const bool duplicate = std::any_of(entries.begin(), entries.end(),
+                                       [&](const std::wstring& existing) {
+                                         return ToLower(existing) == ToLower(entry);
+                                       });
+    if (!duplicate) entries.push_back(std::move(entry));
+  }
 }
 
 // Quote one argv element per the CommandLineToArgvW / CRT rules so the child
@@ -135,11 +185,26 @@ std::vector<std::pair<std::wstring, std::wstring>> BuildEnvironment(
   std::wstring system_drive = system_root.size() >= 2 ? system_root.substr(0, 2) : L"C:";
   const std::wstring home = context.temp_path + L"\\home";
 
-  std::wstring path = system_root + L"\\System32;" + system_root + L";" +
-                      system_root + L"\\System32\\Wbem;" + system_root +
-                      L"\\System32\\WindowsPowerShell\\v1.0";
+  std::vector<std::wstring> path_entries = {
+      system_root + L"\\System32",
+      system_root,
+      system_root + L"\\System32\\Wbem",
+      system_root + L"\\System32\\WindowsPowerShell\\v1.0",
+  };
   for (const std::wstring& tool : context.tool_paths) {
-    if (!tool.empty()) path += L";" + tool;
+    if (!tool.empty()) path_entries.push_back(tool);
+  }
+  for (const auto& [name, value] : context.exposed_environment) {
+    if (ToLower(name) == L"path") {
+      AppendHostPath(value, context.workspace_path, context.host_workspace_root,
+                     context.temp_path, path_entries);
+      break;
+    }
+  }
+  std::wstring path;
+  for (const std::wstring& entry : path_entries) {
+    if (!path.empty()) path.push_back(L';');
+    path.append(entry);
   }
 
   environment.emplace_back(L"SystemRoot", system_root);
@@ -176,6 +241,15 @@ std::vector<std::pair<std::wstring, std::wstring>> BuildEnvironment(
 }
 
 }  // namespace
+
+std::vector<std::wstring> FilterHostPathEntries(const std::wstring& host_path,
+                                                const std::wstring& workspace_path,
+                                                const std::wstring& host_workspace_root,
+                                                const std::wstring& temp_path) {
+  std::vector<std::wstring> entries;
+  AppendHostPath(host_path, workspace_path, host_workspace_root, temp_path, entries);
+  return entries;
+}
 
 core::Result<ShellOutcome> RunShell(const ShellContext& context,
                                     const v1::ShellExecRequest& request,
@@ -227,6 +301,9 @@ core::Result<ShellOutcome> RunShell(const ShellContext& context,
   options.max_output_bytes = output_cap;
   options.should_cancel = should_cancel;
   options.environment = std::move(environment);
+  for (const runtime::ToolAccess& tool : context.tools) {
+    if (!tool.capability_sid.empty()) options.capabilities.push_back(tool.capability_sid);
+  }
   if (!request.stdin_data().empty()) {
     options.stdin_data.assign(request.stdin_data().begin(), request.stdin_data().end());
   }

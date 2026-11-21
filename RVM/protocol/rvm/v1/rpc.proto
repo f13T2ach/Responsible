@@ -45,6 +45,8 @@ message RpcRequest {
     RollbackRequest workspace_rollback = 62;
 
     AuditQueryRequest audit_query = 70;
+
+    SetToolAuthorizationsRequest set_tool_authorizations = 80;
   }
 }
 

@@ -25,6 +25,7 @@ struct ShellContext {
   bool restricted_token = false;
   std::vector<std::pair<std::wstring, std::wstring>> exposed_environment;
   std::vector<std::wstring> tool_paths;
+  std::vector<runtime::ToolAccess> tools;
 };
 
 class SessionManager {
@@ -37,6 +38,9 @@ class SessionManager {
   SessionManager& operator=(const SessionManager&) = delete;
 
   core::Result<v1::Session> Create(const v1::CreateSessionRequest& request);
+  // Replaces the user's global tool authorization list. Sessions may only
+  // request tools that match both path and capability SID from this list.
+  core::Status SetAuthorizedTools(const v1::SetToolAuthorizationsRequest& request);
   core::Status Close(std::uint64_t session_id, const std::string& reason);
   core::Result<v1::Session> Get(std::uint64_t session_id) const;
   std::vector<v1::Session> List() const;
@@ -55,6 +59,7 @@ class SessionManager {
   runtime::IEnvironmentBackend& backend_;
   environment::AvailabilityReport availability_;
   std::map<std::uint64_t, Entry> sessions_;
+  std::vector<runtime::ToolAccess> authorized_tools_;
   std::uint64_t next_id_ = 1;
 };
 

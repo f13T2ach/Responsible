@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -26,6 +27,7 @@ using CreateAppContainerProfileFn = HRESULT(WINAPI*)(PCWSTR, PCWSTR, PCWSTR, PSI
                                                     DWORD, PSID*);
 using DeleteAppContainerProfileFn = HRESULT(WINAPI*)(PCWSTR);
 using DeriveAppContainerSidFn = HRESULT(WINAPI*)(PCWSTR, PSID*);
+using DeriveCapabilitySidsFromNameFn = BOOL(WINAPI*)(PCWSTR, PSID**, PDWORD, PSID**, PDWORD);
 
 std::string LastErrorDetail(DWORD code) {
   return "win32=" + std::to_string(code);
@@ -228,6 +230,52 @@ core::Result<AppContainerProfile> CreateProfile(std::wstring_view name) {
   return core::Ok(AppContainerProfile{profile_name, text.Take()});
 }
 
+core::Result<std::wstring> DeriveCapabilitySid(std::wstring_view name) {
+  // The export lives in kernelbase.dll on current builds and is not forwarded
+// by kernel32.dll, so probe both before declaring the API unavailable.
+  DeriveCapabilitySidsFromNameFn derive = nullptr;
+  for (const wchar_t* module_name : {L"kernel32.dll", L"kernelbase.dll"}) {
+    HMODULE module = GetModuleHandleW(module_name);
+    if (module == nullptr) module = LoadLibraryW(module_name);
+    if (module == nullptr) continue;
+    derive = reinterpret_cast<DeriveCapabilitySidsFromNameFn>(
+        GetProcAddress(module, "DeriveCapabilitySidsFromName"));
+    if (derive != nullptr) break;
+  }
+  if (derive == nullptr) {
+    return core::Error(core::ErrorCode::kNotImplemented,
+                       "DeriveCapabilitySidsFromName is missing from the system");
+  }
+
+  PSID* group_sids = nullptr;
+  DWORD group_count = 0;
+  PSID* capability_sids = nullptr;
+  DWORD capability_count = 0;
+  const std::wstring capability_name(name);
+  if (!derive(capability_name.c_str(), &group_sids, &group_count, &capability_sids,
+              &capability_count)) {
+    return core::Error(core::ErrorCode::kBackendFailed,
+                       "failed to derive the capability SID", false,
+                       LastErrorDetail(GetLastError()));
+  }
+  core::Result<std::wstring> sid_text = core::Error(
+      core::ErrorCode::kBackendFailed, "capability derivation returned no SID");
+  if (capability_count > 0 && capability_sids != nullptr && capability_sids[0] != nullptr) {
+    sid_text = SidToString(capability_sids[0]);
+  }
+  for (DWORD i = 0; i < capability_count; ++i) {
+    if (capability_sids != nullptr && capability_sids[i] != nullptr) {
+      LocalFree(capability_sids[i]);
+    }
+  }
+  for (DWORD i = 0; i < group_count; ++i) {
+    if (group_sids != nullptr && group_sids[i] != nullptr) LocalFree(group_sids[i]);
+  }
+  LocalFree(capability_sids);
+  LocalFree(group_sids);
+  return sid_text;
+}
+
 core::Status DeleteProfile(std::wstring_view name) {
   HMODULE module = LoadLibraryW(L"userenv.dll");
   if (module == nullptr) {
@@ -348,6 +396,19 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
   }
   sid_guard.reset(sid);
 
+  std::vector<std::unique_ptr<void, decltype(&LocalFree)>> capability_guards;
+  std::vector<SID_AND_ATTRIBUTES> capability_entries;
+  for (const std::wstring& capability : options.capabilities) {
+    PSID capability_sid = nullptr;
+    if (!ConvertStringSidToSidW(capability.c_str(), &capability_sid)) {
+      return core::Error(core::ErrorCode::kInvalidArgument,
+                         "a sandbox capability SID is not valid", false,
+                         LastErrorDetail(GetLastError()));
+    }
+    capability_guards.emplace_back(capability_sid, &LocalFree);
+    capability_entries.push_back({capability_sid, SE_GROUP_ENABLED});
+  }
+
   if (!appcontainer) {
     // AppContainer cannot open WinFsp volumes (winfsp/winfsp#705), so mounted
     // workspaces run under a restricted token. Access must satisfy both the
@@ -382,17 +443,23 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
     }
 
     // AppContainer SIDs are rejected by CreateRestrictedToken, so only attach
-    // the session SID when it is a regular SID.
-    SID_AND_ATTRIBUTES restricting[2] = {{users_buffer, 0}, {sid, 0}};
-    DWORD restricting_count = 2;
-    BOOL restricted = CreateRestrictedToken(self, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr,
-                                            restricting_count, restricting, &handles.token);
+    // the session SID when it is a regular SID. Capability SIDs are regular
+    // SIDs and act as additional allowing restrictions for authorized tools.
+    std::vector<SID_AND_ATTRIBUTES> restricting = {{users_buffer, 0}, {sid, 0}};
+    for (const SID_AND_ATTRIBUTES& capability : capability_entries) {
+      restricting.push_back({capability.Sid, 0});
+    }
+    BOOL restricted = CreateRestrictedToken(
+        self, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr,
+        static_cast<DWORD>(restricting.size()), restricting.data(), &handles.token);
     if (!restricted && GetLastError() == ERROR_INVALID_PARAMETER) {
       core::LogWarn("sandbox",
-                    "session SID rejected as a restricting SID; falling back to BUILTIN\\Users");
-      restricting_count = 1;
+                    "session/capability SIDs rejected as restricting SIDs; falling back to "
+                    "BUILTIN\\Users");
+      restricting.resize(1);
       restricted = CreateRestrictedToken(self, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr,
-                                         restricting_count, restricting, &handles.token);
+                                         static_cast<DWORD>(restricting.size()),
+                                         restricting.data(), &handles.token);
     }
     const DWORD token_error = GetLastError();
     CloseHandle(self);
@@ -417,8 +484,9 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
 
   SECURITY_CAPABILITIES capabilities{};
   capabilities.AppContainerSid = sid;
-  capabilities.Capabilities = nullptr;
-  capabilities.CapabilityCount = 0;
+  capabilities.Capabilities =
+      capability_entries.empty() ? nullptr : capability_entries.data();
+  capabilities.CapabilityCount = static_cast<DWORD>(capability_entries.size());
   capabilities.Reserved = 0;
 
   const int attribute_count = appcontainer ? 2 : 1;

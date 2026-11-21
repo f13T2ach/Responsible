@@ -12,7 +12,7 @@
         <TextBlock FontSize="11.5"
                    TextWrapping="Wrap"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                   Text="沙箱默认只提供一套干净的环境变量。勾选需要额外提供给 AI 的变量（值在启动沙箱时读取，不写入磁盘），PATH 类变量由沙箱管理。" />
+                   Text="沙箱默认只提供一套干净的环境变量。勾选需要额外提供给 AI 的变量（值在启动沙箱时读取，不写入磁盘）。勾选 PATH 时，宿主 PATH 中的绝对本地目录会追加到沙箱 PATH；相对路径、UNC 路径、工作区与临时目录会被忽略。" />
 
         <Grid Margin="0,10,0,6">
             <TextBlock Text="环境变量"
@@ -56,19 +56,12 @@
                        FontWeight="SemiBold"
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-            <ui:Button HorizontalAlignment="Right"
-                       Content="添加目录"
-                       Icon="{ui:SymbolIcon Symbol=FolderAdd24, FontSize=14}"
-                       Appearance="Secondary"
-                       FontSize="12"
-                       Padding="10,5"
-                       Click="OnAddTool" />
         </Grid>
         <TextBlock FontSize="11.5"
                    Margin="0,0,0,6"
                    TextWrapping="Wrap"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                   Text="工具目录只授予读取与执行权限，并加入沙箱 PATH；其中的程序运行时会继承同一沙箱令牌，不能读写外部文件。" />
+                   Text="工具目录来自“设置 → 通用 → ACL 授权管理”。这里只决定本次会话允许使用哪些已授权工具；未勾选的工具不会进入沙箱 PATH，也不携带访问权限。" />
 
         <Border MinHeight="54"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
@@ -77,13 +70,15 @@
                 CornerRadius="6"
                 Padding="4">
             <Grid>
-                <TextBlock Text="尚未提供工具目录"
+                <TextBlock Text="还没有全局授权的工具目录，请先到“设置 → 通用”添加。"
                            FontSize="12"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Margin="12,0"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                            Visibility="{Binding HasNoTools, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <ItemsControl ItemsSource="{Binding Tools}" MaxHeight="118">
+                <ItemsControl ItemsSource="{Binding ToolOptions}" MaxHeight="118">
                     <ItemsControl.Template>
                         <ControlTemplate TargetType="ItemsControl">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -92,22 +87,13 @@
                         </ControlTemplate>
                     </ItemsControl.Template>
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type vm:RvmToolItem}">
-                            <DockPanel Margin="4,3">
-                                <ui:Button DockPanel.Dock="Right"
-                                           Style="{StaticResource MoeWorkspaceActionButtonStyle}"
-                                           Icon="{ui:SymbolIcon Symbol=Dismiss24, FontSize=12}"
-                                           ToolTip="移除"
-                                           Command="{Binding DataContext.RemoveToolCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                           CommandParameter="{Binding}" />
-                                <ui:SymbolIcon DockPanel.Dock="Left"
-                                               Symbol="Folder24"
-                                               FontSize="14"
-                                               Margin="0,0,8,0"
-                                               VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Name}"
+                        <DataTemplate DataType="{x:Type vm:RvmToolOptionItem}">
+                            <CheckBox Margin="6,5"
+                                      IsChecked="{Binding IsSelected}"
+                                      IsEnabled="{Binding Available}"
+                                      ToolTip="{Binding Path}">
+                                <StackPanel Margin="4,0,0,0">
+                                    <TextBlock Text="{Binding DisplayName}"
                                                FontSize="12.5"
                                                TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -116,7 +102,7 @@
                                                TextTrimming="CharacterEllipsis"
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
                                 </StackPanel>
-                            </DockPanel>
+                            </CheckBox>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

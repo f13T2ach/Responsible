@@ -55,11 +55,51 @@ public sealed class RvmEngineService : IRvmEngineService
         }
     }
 
+    public async Task<bool> SetToolAuthorizationsAsync(
+        IReadOnlyList<RvmToolAuthorization> tools,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!await EnsureRunningCoreAsync(cancellationToken).ConfigureAwait(false)) return false;
+
+            var body = new List<byte>();
+            foreach (var tool in tools)
+            {
+                if (string.IsNullOrWhiteSpace(tool.Path)
+                    || string.IsNullOrWhiteSpace(tool.CapabilitySid)) continue;
+                RvmProto.AddMessage(body, 1, item =>
+                {
+                    RvmProto.AddString(item, 1, Path.TrimEndingDirectorySeparator(tool.Path));
+                    RvmProto.AddString(item, 2, tool.CapabilitySid);
+                    RvmProto.AddString(item, 3, tool.Name);
+                });
+            }
+
+            var response = await RequestAsync(body, 80, cancellationToken).ConfigureAwait(false);
+            if (response is null) return false;
+            _status = $"已同步 {tools.Count} 个工具授权";
+            return true;
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            _status = $"同步工具授权失败：{ex.Message}";
+            ResetConnection();
+            return false;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task<RvmWorkspaceSession?> CreateWorkspaceSessionAsync(
         string workspaceRoot,
         string driveLetter,
         string storageKey,
         RvmSettings? settings = null,
+        IReadOnlyList<RvmToolAuthorization>? toolAccess = null,
         CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -81,7 +121,7 @@ public sealed class RvmEngineService : IRvmEngineService
             _ = driveLetter;
             _ = storageKey;
 
-            // 只传变量值，名称/工具目录已由用户在 RVM 设置里选定；引擎会再过滤保留名。
+            // 环境变量只传值；工具目录改用全局授权同步后的 tool_access，不再按会话路径授权。
             if (settings is not null)
             {
                 foreach (var name in settings.Environment)
@@ -95,10 +135,19 @@ public sealed class RvmEngineService : IRvmEngineService
                         RvmProto.AddString(item, 2, value);
                     });
                 }
-                foreach (var path in settings.Tools)
+            }
+            if (toolAccess is not null)
+            {
+                foreach (var tool in toolAccess)
                 {
-                    if (string.IsNullOrWhiteSpace(path)) continue;
-                    RvmProto.AddString(body, 13, Path.TrimEndingDirectorySeparator(path));
+                    if (string.IsNullOrWhiteSpace(tool.Path)
+                        || string.IsNullOrWhiteSpace(tool.CapabilitySid)) continue;
+                    RvmProto.AddMessage(body, 14, item =>
+                    {
+                        RvmProto.AddString(item, 1, Path.TrimEndingDirectorySeparator(tool.Path));
+                        RvmProto.AddString(item, 2, tool.CapabilitySid);
+                        RvmProto.AddString(item, 3, tool.Name);
+                    });
                 }
             }
 

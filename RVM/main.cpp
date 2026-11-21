@@ -26,6 +26,7 @@
 #include "sandbox/appcontainer.h"
 #include "sandbox/backend.h"
 #include "security/auth.h"
+#include "server/jailbreak_smoke.h"
 #include "server/pipe_server.h"
 #include "server/session_manager.h"
 #include "workspace/fsp_host.h"
@@ -94,6 +95,8 @@ void PrintUsage() {
                "       RvmEngine --sandbox-smoke <workspace>\n"
                "       RvmEngine --sandbox-exec <workspace> <command line>\n"
                "       RvmEngine --sandbox-session <workspace> [--overlay-drive R:]\n"
+               "       RvmEngine --sandbox-jailbreak <workspace> [--tool-path <dir>]... "
+               "[--python <path>]\n"
                "       RvmEngine --shell-bridge --pipe <name> --session <id> "
                "[--timeout-ms N] -- <argv...>\n"
                "       RvmEngine --winfsp-probe [drive]\n"
@@ -447,6 +450,9 @@ int main(int argc, char** argv) {
   bool sandbox_exec = false;
   bool sandbox_debug = false;
   bool sandbox_session = false;
+  bool sandbox_jailbreak = false;
+  std::vector<std::string> jailbreak_tool_paths;
+  std::string jailbreak_python;
   bool winfsp_smoke = false;
   bool winfsp_probe = false;
   std::string winfsp_drive;
@@ -504,6 +510,25 @@ int main(int argc, char** argv) {
       }
       sandbox_session = true;
       smoke_workspace = argv[++i];
+    } else if (argument == "--sandbox-jailbreak") {
+      if (i + 1 >= argc) {
+        std::cerr << "--sandbox-jailbreak requires a workspace path\n";
+        return 64;
+      }
+      sandbox_jailbreak = true;
+      smoke_workspace = argv[++i];
+    } else if (argument == "--tool-path") {
+      if (i + 1 >= argc) {
+        std::cerr << "--tool-path requires a directory\n";
+        return 64;
+      }
+      jailbreak_tool_paths.emplace_back(argv[++i]);
+    } else if (argument == "--python") {
+      if (i + 1 >= argc) {
+        std::cerr << "--python requires a path\n";
+        return 64;
+      }
+      jailbreak_python = argv[++i];
     } else if (argument == "--overlay-drive") {
       if (i + 1 >= argc) {
         std::cerr << "--overlay-drive requires a drive letter\n";
@@ -813,6 +838,33 @@ int main(int argc, char** argv) {
     rvm::sandbox::RevokeDirectory(profile.value().sid, wide_workspace.value(), true);
     rvm::sandbox::DeleteProfile(profile.value().name);
     return 0;
+  }
+
+  if (sandbox_jailbreak) {
+    auto wide_workspace = rvm::channel::FromUtf8(smoke_workspace);
+    if (!wide_workspace.ok()) {
+      std::cerr << "workspace path is not valid UTF-8\n";
+      return 64;
+    }
+    rvm::server::JailbreakOptions options;
+    options.workspace_root = wide_workspace.value();
+    for (const std::string& path : jailbreak_tool_paths) {
+      auto wide_path = rvm::channel::FromUtf8(path);
+      if (!wide_path.ok()) {
+        std::cerr << "tool path is not valid UTF-8\n";
+        return 64;
+      }
+      options.tool_paths.push_back(wide_path.value());
+    }
+    if (!jailbreak_python.empty()) {
+      auto wide_python = rvm::channel::FromUtf8(jailbreak_python);
+      if (!wide_python.ok()) {
+        std::cerr << "python path is not valid UTF-8\n";
+        return 64;
+      }
+      options.python_exe = wide_python.value();
+    }
+    return rvm::server::RunJailbreakSmoke(options);
   }
 
   if (sandbox_session) {

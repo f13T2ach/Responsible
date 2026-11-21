@@ -20,13 +20,30 @@ public partial class RvmEnvironmentItem : ObservableObject
 
     public string Name { get; }
     public bool Available { get; }
-    public string DisplayName => Available ? Name : $"{Name}（当前不存在）";
+    public bool IsPath => string.Equals(Name, "PATH", StringComparison.OrdinalIgnoreCase);
+
+    public string DisplayName => IsPath
+        ? "PATH（追加宿主 PATH 中的可访问目录）"
+        : Available ? Name : $"{Name}（当前不存在）";
 }
 
-public sealed class RvmToolItem(string path)
+public partial class RvmToolOptionItem : ObservableObject
 {
-    public string Path { get; } = path;
-    public string Name => new DirectoryInfo(Path).Name;
+    public RvmToolOptionItem(string name, string path, bool available, bool isSelected)
+    {
+        Name = name;
+        Path = path;
+        Available = available;
+        IsSelected = isSelected;
+    }
+
+    public string Name { get; }
+    public string Path { get; }
+    public bool Available { get; }
+    public string DisplayName => Available ? Name : $"{Name}（未授权）";
+
+    [ObservableProperty]
+    private bool _isSelected;
 }
 
 // 选择器只保存名称/目录；环境变量的值在每次启动沙箱会话时由宿主读取。
@@ -34,12 +51,15 @@ public partial class RvmSettingsViewModel : ObservableObject
 {
     private static readonly HashSet<string> ManagedNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "PATH", "PATHEXT", "TEMP", "TMP", "TMPDIR", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE",
+        "PATHEXT", "TEMP", "TMP", "TMPDIR", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE",
         "COMSPEC", "USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
         "OS", "PROCESSOR_ARCHITECTURE", "USERNAME", "NUMBER_OF_PROCESSORS", "PSMODULEPATH",
     };
 
+    private readonly IAclAuthorizationService _acl;
     private bool _loading;
+
+    public RvmSettingsViewModel(IAclAuthorizationService acl) => _acl = acl;
 
     [ObservableProperty]
     private string _filter = string.Empty;
@@ -63,7 +83,7 @@ public partial class RvmSettingsViewModel : ObservableObject
 
     public ObservableCollection<RvmEnvironmentItem> EnvironmentVariables { get; } = [];
     public ObservableCollection<RvmEnvironmentItem> VisibleEnvironmentVariables { get; } = [];
-    public ObservableCollection<RvmToolItem> Tools { get; } = [];
+    public ObservableCollection<RvmToolOptionItem> ToolOptions { get; } = [];
 
     public int SelectedEnvironmentCount => EnvironmentVariables.Count(item => item.IsSelected);
 
@@ -78,7 +98,7 @@ public partial class RvmSettingsViewModel : ObservableObject
             Filter = string.Empty;
             EnvironmentVariables.Clear();
             VisibleEnvironmentVariables.Clear();
-            Tools.Clear();
+            ToolOptions.Clear();
 
             var selected = new HashSet<string>(environmentNames, StringComparer.OrdinalIgnoreCase);
             var host = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
@@ -108,7 +128,7 @@ public partial class RvmSettingsViewModel : ObservableObject
             }
             ApplyFilter();
 
-            foreach (var path in toolPaths) AddToolCore(path, validate: false);
+            LoadToolOptions(toolPaths);
         }
         finally
         {
@@ -118,52 +138,58 @@ public partial class RvmSettingsViewModel : ObservableObject
 
     public void Reset() => Load([], [], false);
 
-    public void AddTool(string path) => AddToolCore(path, validate: true);
-
-    private void AddToolCore(string path, bool validate)
+    private void LoadToolOptions(IEnumerable<string> selectedPaths)
     {
-        ToolError = string.Empty;
-        string full;
-        try
+        var selected = new HashSet<string>(selectedPaths, StringComparer.OrdinalIgnoreCase);
+        var authorized = _acl.Grants
+            .Where(grant => grant.State == AclGrantState.Authorized)
+            .GroupBy(grant => grant.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(grant => grant.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var grant in authorized)
         {
-            full = Path.GetFullPath(path);
+            var item = new RvmToolOptionItem(grant.Name, grant.Path, available: true,
+                selected.Contains(grant.Path));
+            item.PropertyChanged += OnToolOptionChanged;
+            ToolOptions.Add(item);
         }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+
+        var known = new HashSet<string>(authorized.Select(grant => grant.Path),
+            StringComparer.OrdinalIgnoreCase);
+        var missing = selectedPaths
+            .Where(path => !known.Contains(path))
+            .Select(path => Path.TrimEndingDirectorySeparator(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        foreach (var path in missing)
         {
-            if (validate) ToolError = "工具目录路径无效。";
-            return;
+            var item = new RvmToolOptionItem(new DirectoryInfo(path).Name, path, available: false,
+                isSelected: false);
+            item.PropertyChanged += OnToolOptionChanged;
+            ToolOptions.Add(item);
         }
-        full = Path.TrimEndingDirectorySeparator(full);
-        if (validate && !Directory.Exists(full))
-        {
-            ToolError = "工具目录不存在。";
-            return;
-        }
-        if (string.Equals(full, Path.GetPathRoot(full)?.TrimEnd(Path.DirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase))
-        {
-            if (validate) ToolError = "不能把整个盘符作为工具目录。";
-            return;
-        }
-        if (Tools.Any(item => string.Equals(item.Path, full, StringComparison.OrdinalIgnoreCase))) return;
-        Tools.Add(new RvmToolItem(full));
-        HasTools = Tools.Count > 0;
-        if (validate) Touched = true;
+
+        if (missing.Length > 0)
+            ToolError = "部分工具目录已不在全局授权列表中，请到“设置 → 通用”重新授权或移除后再保存。";
+
+        HasTools = ToolOptions.Count > 0;
     }
 
-    [RelayCommand]
-    private void RemoveTool(RvmToolItem? item)
+    private void OnToolOptionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
-        if (item is null) return;
-        Tools.Remove(item);
-        HasTools = Tools.Count > 0;
-        Touched = true;
+        if (args.PropertyName == nameof(RvmToolOptionItem.IsSelected) && !_loading)
+            Touched = true;
     }
 
     public RvmSettings Build()
     {
         var environment = EnvironmentVariables.Where(item => item.IsSelected).Select(item => item.Name).ToArray();
-        var tools = Tools.Select(item => item.Path).ToArray();
+        var tools = ToolOptions
+            .Where(item => item.Available && item.IsSelected)
+            .Select(item => item.Path)
+            .ToArray();
         Configured = true;
         return new RvmSettings(environment, tools);
     }

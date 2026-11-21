@@ -46,6 +46,7 @@ namespace Responsible
             services.AddSingleton<IDshPluginService, DshPluginService>();
             services.AddSingleton<IAppThemeService, AppThemeService>();
             services.AddSingleton<IWinFspService, WinFspService>();
+            services.AddSingleton<IAclAuthorizationService, AclAuthorizationService>();
             services.AddSingleton<IRvmEngineService, RvmEngineService>();
             services.AddSingleton<IContentDialogService, ContentDialogService>();
             services.AddSingleton<IProviderEditorService, ProviderEditorService>();

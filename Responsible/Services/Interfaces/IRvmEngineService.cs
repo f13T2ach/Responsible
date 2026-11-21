@@ -2,6 +2,9 @@ namespace Responsible.Services;
 
 public sealed record RvmWorkspaceSession(ulong SessionId, string WorkspaceRoot, string VirtualRoot);
 
+// 全局 ACL 授权在执行前同步给引擎；路径与 capability SID 必须成对出现。
+public sealed record RvmToolAuthorization(string Path, string Name, string CapabilitySid);
+
 // RvmEngine.exe 的宿主进程与命名管道客户端；所有数据来自引擎真实响应，失败只报错不伪造
 public interface IRvmEngineService : IDisposable
 {
@@ -18,11 +21,15 @@ public interface IRvmEngineService : IDisposable
     string? Token { get; }
 
     Task<bool> EnsureRunningAsync(CancellationToken cancellationToken = default);
+    Task<bool> SetToolAuthorizationsAsync(
+        IReadOnlyList<RvmToolAuthorization> tools,
+        CancellationToken cancellationToken = default);
     Task<RvmWorkspaceSession?> CreateWorkspaceSessionAsync(
         string workspaceRoot,
         string driveLetter,
         string storageKey,
         RvmSettings? settings = null,
+        IReadOnlyList<RvmToolAuthorization>? toolAccess = null,
         CancellationToken cancellationToken = default);
     Task CloseSessionAsync(ulong sessionId, CancellationToken cancellationToken = default);
     Task ShutdownAsync();

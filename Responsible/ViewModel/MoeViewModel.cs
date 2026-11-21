@@ -21,6 +21,7 @@ public partial class MoeViewModel : ObservableObject
     private readonly IWorkspaceStore _workspaceStore;
     private readonly IWorkspaceEditorService _workspaceEditor;
     private readonly IContentDialogService _dialogs;
+    private readonly IAclAuthorizationService _acl;
     private IReadOnlyList<DshSessionRow> _lastRows = [];
 
     [ObservableProperty]
@@ -78,12 +79,14 @@ public partial class MoeViewModel : ObservableObject
         IChatSessionService session,
         IWorkspaceStore workspaceStore,
         IWorkspaceEditorService workspaceEditor,
-        IContentDialogService dialogs)
+        IContentDialogService dialogs,
+        IAclAuthorizationService acl)
     {
         _messenger = messenger;
         _workspaceStore = workspaceStore;
         _workspaceEditor = workspaceEditor;
         _dialogs = dialogs;
+        _acl = acl;
         Session = session;
         ModelOptions = catalog.ModelOptions;
         _selectedModelOption = ModelOptions.FirstOrDefault(o => o.IsSelected) ?? ModelOptions.FirstOrDefault();
@@ -490,7 +493,7 @@ public partial class MoeViewModel : ObservableObject
 
     private async Task<RvmSettings?> ShowRvmSettingsDialogAsync(string title, WorkspaceDefinition? definition)
     {
-        var viewModel = new RvmSettingsViewModel();
+        var viewModel = new RvmSettingsViewModel(_acl);
         viewModel.Load(definition?.ExposedEnvironment ?? [], definition?.ExposedTools ?? [],
             definition?.RvmConfigured ?? false);
         var dialog = new ContentDialog

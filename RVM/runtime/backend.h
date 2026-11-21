@@ -26,6 +26,13 @@ enum class EnvironmentPhase {
   kFailed,
 };
 
+// A tool the user authorized once. The capability SID owns the persistent
+// DACL grant; the session token must list it to use the tool.
+struct ToolAccess {
+  std::wstring path;
+  std::wstring capability_sid;
+};
+
 struct EnvironmentSpec {
   std::wstring session_id;
   // Per-workspace storage name; empty keeps the legacy per-session layout.
@@ -45,6 +52,7 @@ struct EnvironmentSpec {
   // granted read/execute to the sandbox identity and prepended to PATH.
   std::vector<std::pair<std::wstring, std::wstring>> exposed_environment;
   std::vector<std::wstring> tool_paths;
+  std::vector<ToolAccess> tools;
 };
 
 struct EnvironmentFacts {
@@ -63,6 +71,7 @@ struct EnvironmentFacts {
   bool restricted_token = false;
   std::vector<std::pair<std::wstring, std::wstring>> exposed_environment;
   std::vector<std::wstring> tool_paths;
+  std::vector<ToolAccess> tools;
 };
 
 class IEnvironment {

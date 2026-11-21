@@ -10,3 +10,4 @@ artifacts/
 RVM/build/
 RVM/cmake-build-debug/
 RVM/.cache/
+Responsible/test_workspace_mock/

@@ -30,4 +30,11 @@ core::Result<ShellOutcome> RunShell(const ShellContext& context,
                                     const v1::ShellExecRequest& request,
                                     const std::function<bool()>& should_cancel);
 
+// Keep only absolute local directories from the host PATH that are neither the
+// workspace nor the session temp; BuildEnvironment uses this before appending.
+std::vector<std::wstring> FilterHostPathEntries(const std::wstring& host_path,
+                                                const std::wstring& workspace_path,
+                                                const std::wstring& host_workspace_root,
+                                                const std::wstring& temp_path);
+
 }  // namespace rvm::server

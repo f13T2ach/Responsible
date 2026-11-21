@@ -131,6 +131,7 @@ target_link_libraries(rvm_channel PUBLIC rvm_core rvm_protocol)
 rvm_enable_warnings(rvm_channel)
 
 add_library(rvm_server STATIC
+  server/jailbreak_smoke.cpp
   server/pipe_server.cpp
   server/rpc_dispatcher.cpp
   server/session_manager.cpp
@@ -171,6 +172,8 @@ if (RVM_BUILD_TESTS)
     tests/test_dispatcher.cpp
     tests/test_pipe.cpp
     tests/test_hcs.cpp
+    tests/test_capability.cpp
+    tests/test_shell_environment.cpp
     tests/test_sessions.cpp
     tests/test_union_view.cpp)
   target_include_directories(rvm_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

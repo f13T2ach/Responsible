@@ -72,7 +72,14 @@ public sealed partial class ChatSessionService
         }
 
         var key = definition.RvmKey;
-        var signature = SettingsSignature(definition.Settings);
+        var selectedTools = ResolveSelectedTools(definition.Settings, out var toolError);
+        if (selectedTools is null)
+        {
+            SetWorkspaceBadge("工具未授权", toolError);
+            return;
+        }
+
+        var signature = SettingsSignature(definition.Settings, selectedTools);
         if (_rvmSessionId != 0 && _rvmVirtualRoot is not null
             && string.Equals(_rvmWorkspaceRoot, workspaceCwd, StringComparison.OrdinalIgnoreCase)
             && string.Equals(_rvmKey, key, StringComparison.Ordinal)
@@ -87,8 +94,18 @@ public sealed partial class ChatSessionService
             return;
         }
 
+        var allTools = _acl.Grants
+            .Where(grant => grant.State == AclGrantState.Authorized)
+            .Select(grant => new RvmToolAuthorization(grant.Path, grant.Name, grant.CapabilitySid))
+            .ToArray();
+        if (!await _rvm.SetToolAuthorizationsAsync(allTools).ConfigureAwait(false))
+        {
+            SetWorkspaceBadge("RVM 不可用", _rvm.Status);
+            return;
+        }
+
         var session = await _rvm.CreateWorkspaceSessionAsync(
-                workspaceCwd, string.Empty, string.Empty, definition.Settings)
+                workspaceCwd, string.Empty, string.Empty, definition.Settings, selectedTools)
             .ConfigureAwait(false);
         if (session is null)
         {
@@ -101,9 +118,51 @@ public sealed partial class ChatSessionService
         _rvmVirtualRoot = session.VirtualRoot;
         _rvmKey = key;
         _rvmSettingsSignature = signature;
+        var toolsNote = selectedTools.Count == 0
+            ? "本次未启用额外工具。"
+            : $"本次启用工具：{string.Join("、", selectedTools.Select(tool => tool.Name))}。";
         SetWorkspaceBadge(
             "RVM 就绪 · 工作区隔离",
-            $"shell 在 AppContainer 令牌中执行，仅能读写工作区（{session.VirtualRoot.TrimEnd('\\')}）与专用 temp；宿主用户目录、系统 temp 与未授权工具目录被 ACL 拒绝。fs 工具只能解析工作区内的路径（插件策略）。");
+            $"shell 在 AppContainer 令牌中执行，仅能读写工作区（{session.VirtualRoot.TrimEnd('\\')}）与专用 temp；宿主用户目录、系统 temp 与未授权工具目录被 ACL 拒绝。{toolsNote}fs 工具只能解析工作区内的路径（插件策略）。");
+    }
+
+    private IReadOnlyList<RvmToolAuthorization>? ResolveSelectedTools(RvmSettings settings,
+        out string? error)
+    {
+        error = null;
+        var authorized = _acl.Grants
+            .Where(grant => grant.State == AclGrantState.Authorized)
+            .GroupBy(grant => grant.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(),
+                StringComparer.OrdinalIgnoreCase);
+        var selected = new List<RvmToolAuthorization>();
+        foreach (var path in settings.Tools)
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            string full;
+            try
+            {
+                full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                           or PathTooLongException)
+            {
+                error = $"工具目录路径无效：{path}";
+                return null;
+            }
+            if (!authorized.TryGetValue(full, out var grant))
+            {
+                error = $"工具目录“{full}”没有全局 ACL 授权。请到“设置 → 通用 → ACL 授权管理”添加或重新授权，或在工作区 RVM 设置中取消勾选。";
+                return null;
+            }
+            if (!Directory.Exists(full))
+            {
+                error = $"已授权的工具目录不存在：{full}";
+                return null;
+            }
+            selected.Add(new RvmToolAuthorization(grant.Path, grant.Name, grant.CapabilitySid));
+        }
+        return selected;
     }
 
     private async Task CloseRvmSessionAsync()
@@ -118,11 +177,24 @@ public sealed partial class ChatSessionService
             await _rvm.CloseSessionAsync(sessionId).ConfigureAwait(false);
     }
 
-    // 环境变量/工具目录变化也必须重建会话：PATH 与 ACL 授权在会话创建时固定。
-    private static string SettingsSignature(RvmSettings settings) =>
-        string.Join('\n', settings.Environment.Order(StringComparer.OrdinalIgnoreCase))
-        + "\u0001"
-        + string.Join('\n', settings.Tools.Order(StringComparer.OrdinalIgnoreCase));
+    // 环境变量/工具目录/授权时间变化都必须重建会话：PATH 与 capability 在创建时固化。
+    private string SettingsSignature(RvmSettings settings,
+        IReadOnlyList<RvmToolAuthorization> selectedTools)
+    {
+        var selected = new HashSet<string>(selectedTools.Select(tool => tool.Path),
+            StringComparer.OrdinalIgnoreCase);
+        var stamps = _acl.Grants
+            .Where(grant => grant.State == AclGrantState.Authorized && selected.Contains(grant.Path))
+            .OrderBy(grant => grant.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(grant => string.Join('|', grant.Path, grant.CapabilitySid,
+                grant.AuthorizedAtUnixMs));
+        return string.Join('\n', settings.Environment.Order(StringComparer.OrdinalIgnoreCase))
+               + "\u0001"
+               + string.Join('\n', selectedTools.Select(tool => tool.Path)
+                   .Order(StringComparer.OrdinalIgnoreCase))
+               + "\u0002"
+               + string.Join('\n', stamps);
+    }
 
     private async Task DisableRvmWorkspaceAsync()
     {

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
@@ -24,17 +25,26 @@ public partial class SettingsViewModel : ObservableObject
     private readonly IAppThemeService _theme;
     private readonly IMessenger _messenger;
     private readonly IWinFspService _winFsp;
+    private readonly IAclAuthorizationService _acl;
 
-    public SettingsViewModel(IModelCatalogService catalog, IProviderEditorService editor, IAppThemeService theme, IMessenger messenger, IWinFspService winFsp)
+    public SettingsViewModel(
+        IModelCatalogService catalog,
+        IProviderEditorService editor,
+        IAppThemeService theme,
+        IMessenger messenger,
+        IWinFspService winFsp,
+        IAclAuthorizationService acl)
     {
         _catalog = catalog;
         _editor = editor;
         _theme = theme;
         _messenger = messenger;
         _winFsp = winFsp;
+        _acl = acl;
         _winFspDriveLetter = winFsp.DriveLetter;
         WinFspDriveLetters = winFsp.AvailableDriveLetters();
         RefreshWinFsp();
+        LoadAclAuthorizations();
         _selectedNavItem = NavItems.First(i => i.Id == "models");
     }
 
@@ -138,6 +148,111 @@ public partial class SettingsViewModel : ObservableObject
         {
             IsWinFspBusy = false;
         }
+    }
+
+    public ObservableCollection<AclToolItemViewModel> AclAuthorizations { get; } = [];
+
+    [ObservableProperty]
+    private string _aclError = string.Empty;
+
+    public bool HasNoAclAuthorizations => AclAuthorizations.Count == 0;
+
+    public bool IsAclNotBusy => !AclAuthorizations.Any(item => item.IsBusy);
+
+    public void AddAclTool(string path)
+    {
+        if (!IsAclNotBusy)
+            return;
+
+        var (grant, error) = _acl.Prepare(path);
+        if (grant is null)
+        {
+            AclError = error ?? "无法添加该目录。";
+            return;
+        }
+
+        AclError = string.Empty;
+        var item = new AclToolItemViewModel(grant);
+        item.PropertyChanged += OnAclItemPropertyChanged;
+        AclAuthorizations.Add(item);
+        OnPropertyChanged(nameof(HasNoAclAuthorizations));
+        OnPropertyChanged(nameof(IsAclNotBusy));
+        _ = GrantAclAsync(item);
+    }
+
+    [RelayCommand]
+    private Task RetryAclAsync(AclToolItemViewModel? item)
+    {
+        if (item is null || item.State != AclGrantState.Error)
+            return Task.CompletedTask;
+
+        return item.LastOperationWasRevoke ? RevokeAclAsync(item) : GrantAclAsync(item);
+    }
+
+    [RelayCommand]
+    private Task RemoveAclAsync(AclToolItemViewModel? item) =>
+        item is null ? Task.CompletedTask : RevokeAclAsync(item);
+
+    private async Task GrantAclAsync(AclToolItemViewModel item)
+    {
+        item.BeginGrant();
+        AclError = string.Empty;
+        try
+        {
+            var progress = new Progress<AclProgress>(item.ApplyProgress);
+            var result = await _acl.GrantAsync(item.Grant, progress);
+            item.Complete(
+                result.Success ? AclGrantState.Authorized : AclGrantState.Error,
+                result.Message);
+        }
+        catch (Exception ex)
+        {
+            item.Complete(AclGrantState.Error, $"授权失败：{ex.Message}");
+        }
+    }
+
+    private async Task RevokeAclAsync(AclToolItemViewModel item)
+    {
+        item.BeginRevoke();
+        AclError = string.Empty;
+        try
+        {
+            var progress = new Progress<AclProgress>(item.ApplyProgress);
+            var result = await _acl.RevokeAsync(item.Grant, progress);
+            if (!result.Success)
+            {
+                item.Complete(AclGrantState.Error, result.Message);
+                return;
+            }
+
+            item.PropertyChanged -= OnAclItemPropertyChanged;
+            AclAuthorizations.Remove(item);
+            OnPropertyChanged(nameof(HasNoAclAuthorizations));
+            OnPropertyChanged(nameof(IsAclNotBusy));
+        }
+        catch (Exception ex)
+        {
+            item.Complete(AclGrantState.Error, $"撤销失败：{ex.Message}");
+        }
+    }
+
+    private void LoadAclAuthorizations()
+    {
+        foreach (var grant in _acl.Grants)
+        {
+            var item = new AclToolItemViewModel(grant);
+            item.PropertyChanged += OnAclItemPropertyChanged;
+            AclAuthorizations.Add(item);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_acl.LoadError))
+            AclError = _acl.LoadError;
+    }
+
+    private void OnAclItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AclToolItemViewModel.IsBusy))
+            OnPropertyChanged(nameof(IsAclNotBusy));
     }
 
     [RelayCommand]
