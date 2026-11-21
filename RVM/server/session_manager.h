@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/result.h"
@@ -22,6 +23,8 @@ struct ShellContext {
   std::wstring temp_path;
   std::wstring appcontainer_sid;
   bool restricted_token = false;
+  std::vector<std::pair<std::wstring, std::wstring>> exposed_environment;
+  std::vector<std::wstring> tool_paths;
 };
 
 class SessionManager {

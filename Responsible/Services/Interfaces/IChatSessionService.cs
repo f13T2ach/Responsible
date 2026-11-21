@@ -80,6 +80,8 @@ public interface IChatSessionService
     string? PermissionValue { get; }
     /// <summary>当前会话所在工作区是否启用了 RVM 隔离保护（工作区显式选项，不是默认值）。</summary>
     bool IsRvmProtected { get; }
+    /// <summary>当前 cwd 归属的工作区；未登记时为 null。</summary>
+    WorkspaceDefinition? CurrentWorkspace { get; }
 
     event Action<ChatMessage>? Appended;
     event Action<ChatMessage>? MessageUpdated;
@@ -111,4 +113,8 @@ public interface IChatSessionService
     Task<KernelRestartResult> RestartKernelAsync();
     /// <summary>切换当前 live 会话的权限 preset（沙箱模式 + 审批策略）。</summary>
     Task<PermissionResult> SelectPermissionAsync(string preset);
+    /// <summary>开启当前工作区的 RVM 隔离保护；settings 为 null 时沿用已保存设置。</summary>
+    Task<PermissionResult> EnableRvmProtectionAsync(RvmSettings? settings);
+    /// <summary>保存工作区的环境变量/工具目录；正在受保护时重建会话。</summary>
+    Task<PermissionResult> UpdateRvmSettingsAsync(string workspaceId, RvmSettings settings);
 }

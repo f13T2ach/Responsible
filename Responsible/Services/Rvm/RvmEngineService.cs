@@ -59,6 +59,7 @@ public sealed class RvmEngineService : IRvmEngineService
         string workspaceRoot,
         string driveLetter,
         string storageKey,
+        RvmSettings? settings = null,
         CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -75,10 +76,31 @@ public sealed class RvmEngineService : IRvmEngineService
                 RvmProto.AddVarint(policy, 4, 1); // APPROVAL_MODE_ASK
                 RvmProto.AddBool(policy, 3, false); // network_access
             });
-            RvmProto.AddBool(body, 9, true); // overlay_workspace
-            RvmProto.AddString(body, 10, NormalizeDrive(driveLetter));
-            if (!string.IsNullOrWhiteSpace(storageKey))
-                RvmProto.AddString(body, 11, storageKey); // RVM/<工作区名>_<id>
+            // 直接工作区模式：WinFsp 挂载卷无法向 AppContainer 开放
+            // （winfsp/winfsp#705），叠加层因此不可隔离；不传 overlay/drive/storage。
+            _ = driveLetter;
+            _ = storageKey;
+
+            // 只传变量值，名称/工具目录已由用户在 RVM 设置里选定；引擎会再过滤保留名。
+            if (settings is not null)
+            {
+                foreach (var name in settings.Environment)
+                {
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var value = Environment.GetEnvironmentVariable(name);
+                    if (value is null) continue;
+                    RvmProto.AddMessage(body, 12, item =>
+                    {
+                        RvmProto.AddString(item, 1, name);
+                        RvmProto.AddString(item, 2, value);
+                    });
+                }
+                foreach (var path in settings.Tools)
+                {
+                    if (string.IsNullOrWhiteSpace(path)) continue;
+                    RvmProto.AddString(body, 13, Path.TrimEndingDirectorySeparator(path));
+                }
+            }
 
             var response = await RequestAsync(body, 20, cancellationToken).ConfigureAwait(false);
             if (response is null) return null;

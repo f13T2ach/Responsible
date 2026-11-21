@@ -22,6 +22,7 @@ public interface IRvmEngineService : IDisposable
         string workspaceRoot,
         string driveLetter,
         string storageKey,
+        RvmSettings? settings = null,
         CancellationToken cancellationToken = default);
     Task CloseSessionAsync(ulong sessionId, CancellationToken cancellationToken = default);
     Task ShutdownAsync();

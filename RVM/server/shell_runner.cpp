@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 #include "channel/convert.h"
 #include "core/error.h"
@@ -17,8 +19,6 @@ constexpr std::uint32_t kMaxTimeoutMs = 1800000;
 constexpr std::uint32_t kMinTimeoutMs = 100;
 constexpr std::uint32_t kDefaultOutputCap = 4u * 1024u * 1024u;
 constexpr std::uint32_t kMaxOutputCap = 16u * 1024u * 1024u;
-constexpr std::size_t kMaxEnvironmentEntries = 512;
-constexpr std::size_t kMaxEnvironmentChars = 1024 * 1024;
 
 std::wstring ToLower(std::wstring value) {
   for (wchar_t& ch : value) {
@@ -97,45 +97,82 @@ core::Result<std::wstring> TranslateWorkdir(const ShellContext& context,
                      std::string(workdir.begin(), workdir.end()));
 }
 
-core::Result<std::vector<std::pair<std::wstring, std::wstring>>> TranslateEnvironment(
-    const ShellContext& context, const v1::ShellExecRequest& request) {
+std::wstring HostEnvironmentValue(const wchar_t* name) {
+  const DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
+  if (size == 0) return {};
+  std::wstring value(size, L'\0');
+  const DWORD copied = GetEnvironmentVariableW(name, value.data(), size);
+  if (copied == 0 || copied >= size) return {};
+  value.resize(copied);
+  return value;
+}
+
+// Names whose value must always come from the sandbox, never from the user's
+// exposed set: they decide where processes write or which binaries load.
+bool IsEngineEnvironmentName(const std::wstring& lower) {
+  static const wchar_t* const kReserved[] = {
+      L"path",       L"pathext",      L"temp",        L"tmp",
+      L"tmpdir",     L"systemroot",   L"windir",      L"systemdrive",
+      L"comspec",    L"userprofile",  L"home",        L"homedrive",
+      L"homepath",   L"appdata",      L"localappdata", L"username",
+      L"os",         L"number_of_processors", L"processor_architecture",
+      L"psmodulepath"};
+  for (const wchar_t* name : kReserved) {
+    if (lower == name) return true;
+  }
+  return lower.rfind(L"responsible_rvm_", 0) == 0;
+}
+
+// Build the complete child environment. Nothing from the host is forwarded:
+// only the variables the engine needs, the session temp/home tree, and the
+// variables/tools the user explicitly exposed. TEMP therefore always points
+// at the sandbox temp even if the caller passes its own TEMP.
+std::vector<std::pair<std::wstring, std::wstring>> BuildEnvironment(
+    const ShellContext& context) {
   std::vector<std::pair<std::wstring, std::wstring>> environment;
-  const auto& entries = request.env();
-  if (entries.size() > kMaxEnvironmentEntries) {
-    return core::Error(core::ErrorCode::kInvalidArgument,
-                       "environment has too many entries");
+  std::wstring system_root = HostEnvironmentValue(L"SystemRoot");
+  if (system_root.empty()) system_root = L"C:\\Windows";
+  std::wstring system_drive = system_root.size() >= 2 ? system_root.substr(0, 2) : L"C:";
+  const std::wstring home = context.temp_path + L"\\home";
+
+  std::wstring path = system_root + L"\\System32;" + system_root + L";" +
+                      system_root + L"\\System32\\Wbem;" + system_root +
+                      L"\\System32\\WindowsPowerShell\\v1.0";
+  for (const std::wstring& tool : context.tool_paths) {
+    if (!tool.empty()) path += L";" + tool;
   }
-  std::size_t total = 0;
-  environment.reserve(entries.size());
-  for (const auto& entry : entries) {
-    if (entry.first.empty() || entry.first.find('=') != std::string::npos ||
-        entry.first.find('\0') != std::string::npos) {
-      return core::Error(core::ErrorCode::kInvalidArgument,
-                         "environment variable names must be non-empty without '='");
-    }
-    auto name = channel::FromUtf8(entry.first);
-    if (!name.ok()) return name.error();
-    auto value = channel::FromUtf8(entry.second);
-    if (!value.ok()) return value.error();
-    total += name.value().size() + value.value().size() + 2;
-    if (total > kMaxEnvironmentChars) {
-      return core::Error(core::ErrorCode::kInvalidArgument,
-                         "environment exceeds the size limit");
-    }
-    environment.emplace_back(std::move(name.value()), std::move(value.value()));
+
+  environment.emplace_back(L"SystemRoot", system_root);
+  environment.emplace_back(L"windir", system_root);
+  environment.emplace_back(L"SystemDrive", system_drive);
+  environment.emplace_back(L"ComSpec", system_root + L"\\System32\\cmd.exe");
+  environment.emplace_back(
+      L"PATHEXT", L".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC");
+  environment.emplace_back(L"PATH", path);
+  environment.emplace_back(L"PSModulePath",
+                           system_root + L"\\System32\\WindowsPowerShell\\v1.0\\Modules");
+  environment.emplace_back(L"OS", L"Windows_NT");
+  environment.emplace_back(L"PROCESSOR_ARCHITECTURE", L"AMD64");
+  environment.emplace_back(L"USERNAME", L"rvm");
+  const std::wstring processors = HostEnvironmentValue(L"NUMBER_OF_PROCESSORS");
+  if (!processors.empty()) environment.emplace_back(L"NUMBER_OF_PROCESSORS", processors);
+
+  environment.emplace_back(L"TEMP", context.temp_path);
+  environment.emplace_back(L"TMP", context.temp_path);
+  environment.emplace_back(L"TMPDIR", context.temp_path);
+  environment.emplace_back(L"HOME", home);
+  environment.emplace_back(L"USERPROFILE", home);
+  environment.emplace_back(L"HOMEDRIVE", system_drive);
+  environment.emplace_back(L"HOMEPATH", home.size() > 2 ? home.substr(2) : L"\\");
+  environment.emplace_back(L"APPDATA", home + L"\\AppData\\Roaming");
+  environment.emplace_back(L"LOCALAPPDATA", home + L"\\AppData\\Local");
+
+  for (const auto& [name, value] : context.exposed_environment) {
+    if (name.empty() || name.find(L'=') != std::wstring::npos) continue;
+    if (IsEngineEnvironmentName(ToLower(name))) continue;
+    environment.emplace_back(name, value);
   }
-  if (!context.temp_path.empty()) {
-    // Session-scoped temp replaces any caller-provided TEMP/TMP/TMPDIR so the
-    // child can never fall back to the host %TEMP%.
-    std::erase_if(environment, [](const auto& entry) {
-      const std::wstring name = ToLower(entry.first);
-      return name == L"temp" || name == L"tmp" || name == L"tmpdir";
-    });
-    environment.emplace_back(L"TEMP", context.temp_path);
-    environment.emplace_back(L"TMP", context.temp_path);
-    environment.emplace_back(L"TMPDIR", context.temp_path);
-  }
-  return core::Ok(std::move(environment));
+  return environment;
 }
 
 }  // namespace
@@ -171,8 +208,7 @@ core::Result<ShellOutcome> RunShell(const ShellContext& context,
                        "shell request needs argv or a command");
   }
 
-  auto environment = TranslateEnvironment(context, request);
-  if (!environment.ok()) return environment.error();
+  auto environment = BuildEnvironment(context);
 
   std::uint32_t timeout_ms = request.timeout_ms();
   if (timeout_ms == 0) timeout_ms = kDefaultTimeoutMs;
@@ -190,13 +226,11 @@ core::Result<ShellOutcome> RunShell(const ShellContext& context,
   options.max_processes = 64;
   options.max_output_bytes = output_cap;
   options.should_cancel = should_cancel;
-  options.environment = environment.Take();
+  options.environment = std::move(environment);
   if (!request.stdin_data().empty()) {
     options.stdin_data.assign(request.stdin_data().begin(), request.stdin_data().end());
   }
 
-  // Mounted (overlay) workspaces always run under the restricted token; direct
-  // workspaces keep full AppContainer containment.
   options.containment = context.restricted_token ? sandbox::Containment::kRestrictedToken
                                                  : sandbox::Containment::kAppContainer;
   options.appcontainer_sid = context.appcontainer_sid;

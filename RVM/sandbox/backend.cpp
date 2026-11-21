@@ -106,17 +106,44 @@ std::wstring WorkspaceStorageRoot(const runtime::EnvironmentSpec& spec) {
   return (fs::path(base) / L"sessions" / name).wstring();
 }
 
+// The session temp lives beside the workspace, not under %LOCALAPPDATA%: an
+// AppContainer has no traverse right through the host user profile, and adding
+// one makes Windows re-propagate the profile's inheritable DACL (minutes on a
+// populated AppData\Local). Keeping it under the workspace lets the existing
+// workspace grant cover it and keeps temp off the system drive.
 std::wstring WorkspaceTempRoot(const runtime::EnvironmentSpec& spec) {
-  std::wstring key = spec.storage_key;
-  if (key.empty()) {
-    key = L"session-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
-          std::to_wstring(GetTickCount64());
-  } else {
-    for (wchar_t& ch : key) {
-      if (!IsSafeKeyChar(ch)) ch = L'_';
-    }
+  return (fs::path(spec.workspace_root) / L".rvm_temp").wstring();
+}
+
+std::wstring EnvironmentValue(const wchar_t* name) {
+  const DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
+  if (size == 0) return {};
+  std::wstring value(size, L'\0');
+  const DWORD copied = GetEnvironmentVariableW(name, value.data(), size);
+  if (copied == 0 || copied >= size) return {};
+  value.resize(copied);
+  return value;
+}
+
+// The shell tool needs its host executable to be readable/executable by the
+// AppContainer; cmd.exe in System32 is covered by ALL APPLICATION PACKAGES,
+// but PowerShell 7 and the legacy engine may not be.
+std::vector<std::wstring> ShellHostDirectories() {
+  std::vector<std::wstring> dirs;
+  const std::wstring program_files = EnvironmentValue(L"ProgramFiles");
+  if (!program_files.empty()) {
+    const std::wstring pwsh = (fs::path(program_files) / L"PowerShell" / L"7").wstring();
+    std::error_code error;
+    if (fs::is_directory(pwsh, error) && !error) dirs.push_back(pwsh);
   }
-  return (fs::path(RvmStorageBase()) / L".rvm_temp" / key).wstring();
+  const std::wstring system_root = EnvironmentValue(L"SystemRoot");
+  if (!system_root.empty()) {
+    const std::wstring legacy =
+        (fs::path(system_root) / L"System32" / L"WindowsPowerShell" / L"v1.0").wstring();
+    std::error_code error;
+    if (fs::is_directory(legacy, error) && !error) dirs.push_back(legacy);
+  }
+  return dirs;
 }
 
 }  // namespace
@@ -154,6 +181,17 @@ class SandboxEnvironment final : public runtime::IEnvironment {
       return core::Error(core::ErrorCode::kNotImplemented,
                          "the sandbox does not expose network access; disable network access");
     }
+    // WinFsp volumes reject AppContainer opens (winfsp/winfsp#705) and
+    // restricted tokens cannot start child processes on this Windows build
+    // (every image exits with 0xC0000022), so an overlay cannot be isolated.
+    // Running the session straight in the workspace keeps the full AppContainer
+    // containment; never fall back silently.
+    if (spec_.overlay_workspace) {
+      return core::Error(
+          core::ErrorCode::kNotImplemented,
+          "the workspace overlay cannot run inside an isolated sandbox on this Windows build",
+          false, "run the session directly in the workspace instead");
+    }
 
     phase_ = runtime::EnvironmentPhase::kCreating;
 
@@ -163,10 +201,14 @@ class SandboxEnvironment final : public runtime::IEnvironment {
       return profile.error();
     }
     profile_ = profile.Take();
+    core::LogDebug("sandbox", "AppContainer profile ready");
 
     temp_root_ = WorkspaceTempRoot(spec_);
     std::error_code temp_error;
     fs::create_directories(temp_root_, temp_error);
+    const fs::path home = fs::path(temp_root_) / L"home";
+    if (!temp_error) fs::create_directories(home / L"AppData" / L"Local", temp_error);
+    if (!temp_error) fs::create_directories(home / L"AppData" / L"Roaming", temp_error);
     if (temp_error) {
       StopProfile();
       phase_ = runtime::EnvironmentPhase::kFailed;
@@ -174,6 +216,12 @@ class SandboxEnvironment final : public runtime::IEnvironment {
                          "failed to create the session temp directory", false,
                          temp_error.message());
     }
+    core::LogDebug("sandbox", "session temp directories created");
+
+    // Every sandboxed process (direct or overlay) gets its own temp tree.
+    // It sits under the workspace, so the workspace grant (or the overlay
+    // mount) already covers it; no host profile traversal is involved.
+    core::LogDebug("sandbox", "session temp ready");
 
     const bool write = spec_.policy.mode != core::SandboxMode::kReadOnly;
     if (spec_.overlay_workspace) {
@@ -184,16 +232,32 @@ class SandboxEnvironment final : public runtime::IEnvironment {
         phase_ = runtime::EnvironmentPhase::kFailed;
         return mounted.error();
       }
+      // TEMP points at the host path beside the workspace, not at R:\; the
+      // mount only exposes the workspace itself.
+      const core::Status temp = GrantDirectory(profile_.sid, temp_root_, write, true);
+      if (!temp.ok()) {
+        Stop();
+        phase_ = runtime::EnvironmentPhase::kFailed;
+        return temp.error();
+      }
+      granted_directories_.push_back(temp_root_);
+      const core::Status temp_ancestors =
+          GrantTraverseAncestors(profile_.sid, temp_root_, &granted_ancestors_);
+      if (!temp_ancestors.ok()) {
+        core::LogWarn("sandbox", "could not grant traverse rights to the temp ancestors: " +
+                                     temp_ancestors.error().message + " " +
+                                     temp_ancestors.error().detail);
+      }
     } else {
       core::Status granted = GrantDirectory(profile_.sid, spec_.workspace_root, write, true);
       if (!granted.ok()) {
-        StopProfile();
+        Stop();
         phase_ = runtime::EnvironmentPhase::kFailed;
         return granted.error();
       }
       granted_directories_.push_back(spec_.workspace_root);
 
-      const core::Status temp = GrantDirectory(profile_.sid, temp_root_, true, true);
+      const core::Status temp = GrantDirectory(profile_.sid, temp_root_, write, true);
       if (!temp.ok()) {
         Stop();
         phase_ = runtime::EnvironmentPhase::kFailed;
@@ -214,7 +278,64 @@ class SandboxEnvironment final : public runtime::IEnvironment {
         phase_ = runtime::EnvironmentPhase::kFailed;
         return reachable.error();
       }
+      core::LogDebug("sandbox", "direct workspace access verified");
     }
+
+    // The user explicitly exposed these tool compilers/interpreters. They get
+    // read/execute only; writes stay confined to the workspace and temp.
+    for (const std::wstring& tool : spec_.tool_paths) {
+      std::error_code tool_error;
+      if (!IsAbsolutePath(tool) || !fs::is_directory(tool, tool_error) || tool_error) {
+        Stop();
+        phase_ = runtime::EnvironmentPhase::kFailed;
+        return core::Error(core::ErrorCode::kInvalidArgument,
+                           "an exposed tool directory is not an absolute directory", false,
+                           std::string(tool.begin(), tool.end()));
+      }
+      if (std::find(granted_directories_.begin(), granted_directories_.end(), tool) !=
+          granted_directories_.end()) {
+        continue;
+      }
+      const core::Status ancestors = GrantTraverseAncestors(profile_.sid, tool, &granted_ancestors_);
+      if (!ancestors.ok()) {
+        core::LogWarn("sandbox", "could not grant traverse rights to a tool directory: " +
+                                     ancestors.error().message + " " + ancestors.error().detail);
+      }
+      const core::Status granted = GrantDirectoryReadExecute(profile_.sid, tool, true);
+      if (!granted.ok()) {
+        Stop();
+        phase_ = runtime::EnvironmentPhase::kFailed;
+        return granted.error();
+      }
+      granted_directories_.push_back(tool);
+    }
+    if (!spec_.tool_paths.empty()) core::LogDebug("sandbox", "exposed tool directories granted");
+
+    // The shell host executable (pwsh) is provided by the host toolchain, not
+    // by the user's tool list; it still needs an explicit read/execute grant.
+    for (const std::wstring& dir : ShellHostDirectories()) {
+      if (std::find(granted_directories_.begin(), granted_directories_.end(), dir) !=
+          granted_directories_.end()) {
+        continue;
+      }
+      const core::Status granted = GrantDirectoryReadExecute(profile_.sid, dir, true);
+      if (!granted.ok()) {
+        core::LogWarn("sandbox", "could not grant read access to a shell host directory: " +
+                                     granted.error().message);
+        continue;
+      }
+      granted_directories_.push_back(dir);
+    }
+    core::LogDebug("sandbox", "shell host directories granted");
+
+    // Fail closed unless the containment really denies the host profile.
+    const core::Status isolated = VerifyHostIsolation();
+    if (!isolated.ok()) {
+      Stop();
+      phase_ = runtime::EnvironmentPhase::kFailed;
+      return isolated.error();
+    }
+    core::LogDebug("sandbox", "host profile isolation verified");
 
     phase_ = runtime::EnvironmentPhase::kReady;
     runtime::EnvironmentFacts facts;
@@ -227,11 +348,14 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     facts.vcpu_count = spec_.vcpu_count == 0
                            ? std::max(1u, std::thread::hardware_concurrency())
                            : spec_.vcpu_count;
+    core::LogDebug("sandbox", "probing virtualization facts");
     facts.vbs_enabled = environment::ProbeVbs().ok();
     facts.hvci_enabled = environment::ProbeHvci().ok();
     facts.network_enabled = false;
     facts.appcontainer_sid = profile_.sid;
-    facts.restricted_token = overlay_mount_ != nullptr;
+    facts.restricted_token = false;
+    facts.exposed_environment = spec_.exposed_environment;
+    facts.tool_paths = spec_.tool_paths;
     core::LogInfo("sandbox", "sandbox environment ready");
     return facts;
   }
@@ -341,7 +465,7 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     probe.command_line = write ? L"cmd.exe /c \"echo rvm> .rvm-overlay-probe\""
                                : L"cmd.exe /c \"dir /b > nul\"";
     probe.working_directory = session_workspace_;
-    // WinFsp volumes reject AppContainer device opens (winfsp/winfsp#705).
+    probe.appcontainer_sid = profile_.sid;
     probe.containment = Containment::kRestrictedToken;
     probe.timeout_ms = 20000;
     probe.memory_limit_bytes = 512ull * 1024 * 1024;
@@ -389,7 +513,44 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     if (temp_root_.empty()) return;
     std::error_code ignored;
     fs::remove_all(temp_root_, ignored);
+    // A tool that wrote through R: rows the temp path into the overlay diff;
+    // drop that copy too so it does not reappear on the next mount.
+    if (!overlay_session_root_.empty()) {
+      fs::remove_all(fs::path(overlay_session_root_) / L"diff" / L".rvm_temp", ignored);
+    }
     temp_root_.clear();
+  }
+
+  // Both containments must deny the host profile; anything else is an escape.
+  // A restriction that cannot run the probe (loader failure, timeout) is also
+  // treated as a failure so a broken setup never silently starts unprotected.
+  core::Status VerifyHostIsolation() {
+    ProcessOptions probe;
+    probe.command_line =
+        L"cmd.exe /c \"dir /b \\\"%USERPROFILE%\\\" >nul 2>&1 & if errorlevel 1 "
+        L"(echo RVM_PROFILE_DENIED) else (echo RVM_PROFILE_READABLE)\"";
+    probe.working_directory = overlay_mount_ ? session_workspace_ : spec_.workspace_root;
+    probe.appcontainer_sid = profile_.sid;
+    probe.timeout_ms = 20000;
+    probe.memory_limit_bytes = 512ull * 1024 * 1024;
+    probe.max_processes = 4;
+
+    auto result = RunProcess(probe);
+    if (!result.ok()) {
+      return core::Status::Failure(core::Error(
+          core::ErrorCode::kBackendFailed, "failed to verify host profile isolation", false,
+          result.error().detail));
+    }
+    const bool denied = result.value().output.find("RVM_PROFILE_DENIED") != std::string::npos;
+    if (denied && !result.value().timed_out) return core::Status::Ok();
+
+    std::string detail = "exit=" + std::to_string(result.value().exit_code);
+    if (result.value().timed_out) detail += " timed_out";
+    if (!result.value().output.empty()) detail += " output=" + result.value().output;
+    if (!result.value().error.empty()) detail += " error=" + result.value().error;
+    return core::Status::Failure(core::Error(
+        core::ErrorCode::kPolicyDenied, "the sandbox can still read the host user profile", false,
+        detail));
   }
 
   core::Status VerifyWorkspaceAccess(bool write) {

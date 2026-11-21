@@ -2,13 +2,17 @@ using System.IO;
 
 namespace Responsible.Services;
 
-// 工作区叠加盘生命周期：DSH 内核启动时按当前工作区准备 RVM 会话并挂载盘符。
-// shell 工具经 RvmEngine --shell-bridge 转入该会话执行；fs 工具尚未接管，仍直连宿主。
+// RVM 会话生命周期：DSH 内核启动时按当前工作区准备 AppContainer 会话。
+// shell 工具经 RvmEngine --shell-bridge 转入该会话执行；fs 工具由 rvm-sandbox
+// 插件把解析目标限制在工作区内。
 public sealed partial class ChatSessionService
 {
     private readonly SemaphoreSlim _rvmWorkspaceGate = new(1, 1);
+    private string? _rvmSettingsSignature;
 
     public bool IsRvmProtected => WorkspaceForCwd(CurrentCwd())?.RvmProtected == true;
+
+    public WorkspaceDefinition? CurrentWorkspace => WorkspaceForCwd(CurrentCwd());
 
     // 工作区按文件夹归属：会话 cwd 等于或位于某个源文件夹内即视为该工作区
     private WorkspaceDefinition? WorkspaceForCwd(string cwd)
@@ -68,19 +72,14 @@ public sealed partial class ChatSessionService
         }
 
         var key = definition.RvmKey;
+        var signature = SettingsSignature(definition.Settings);
         if (_rvmSessionId != 0 && _rvmVirtualRoot is not null
             && string.Equals(_rvmWorkspaceRoot, workspaceCwd, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(_rvmKey, key, StringComparison.Ordinal))
+            && string.Equals(_rvmKey, key, StringComparison.Ordinal)
+            && string.Equals(_rvmSettingsSignature, signature, StringComparison.Ordinal))
             return;
 
         await CloseRvmSessionAsync().ConfigureAwait(false);
-
-        var probe = _winFsp.Probe();
-        if (!probe.Installed)
-        {
-            SetWorkspaceBadge("RVM 不可用", "未安装 WinFsp：shell 退回 DSH 沙箱，工作区未隔离。");
-            return;
-        }
 
         if (!await _rvm.EnsureRunningAsync().ConfigureAwait(false))
         {
@@ -88,7 +87,8 @@ public sealed partial class ChatSessionService
             return;
         }
 
-        var session = await _rvm.CreateWorkspaceSessionAsync(workspaceCwd, _winFsp.DriveLetter, key)
+        var session = await _rvm.CreateWorkspaceSessionAsync(
+                workspaceCwd, string.Empty, string.Empty, definition.Settings)
             .ConfigureAwait(false);
         if (session is null)
         {
@@ -100,9 +100,10 @@ public sealed partial class ChatSessionService
         _rvmWorkspaceRoot = workspaceCwd;
         _rvmVirtualRoot = session.VirtualRoot;
         _rvmKey = key;
+        _rvmSettingsSignature = signature;
         SetWorkspaceBadge(
-            $"RVM 就绪 · {session.VirtualRoot.TrimEnd('\\')}",
-            $"工作区叠加盘已挂载：{session.VirtualRoot} ← {workspaceCwd}。存储目录：%LOCALAPPDATA%\\Responsible\\RVM\\{key}；shell 经 RVM 会话执行，fs 读写工具仍直接访问宿主目录。");
+            "RVM 就绪 · 工作区隔离",
+            $"shell 在 AppContainer 令牌中执行，仅能读写工作区（{session.VirtualRoot.TrimEnd('\\')}）与专用 temp；宿主用户目录、系统 temp 与未授权工具目录被 ACL 拒绝。fs 工具只能解析工作区内的路径（插件策略）。");
     }
 
     private async Task CloseRvmSessionAsync()
@@ -112,9 +113,16 @@ public sealed partial class ChatSessionService
         _rvmWorkspaceRoot = null;
         _rvmVirtualRoot = null;
         _rvmKey = null;
+        _rvmSettingsSignature = null;
         if (sessionId != 0)
             await _rvm.CloseSessionAsync(sessionId).ConfigureAwait(false);
     }
+
+    // 环境变量/工具目录变化也必须重建会话：PATH 与 ACL 授权在会话创建时固定。
+    private static string SettingsSignature(RvmSettings settings) =>
+        string.Join('\n', settings.Environment.Order(StringComparer.OrdinalIgnoreCase))
+        + "\u0001"
+        + string.Join('\n', settings.Tools.Order(StringComparer.OrdinalIgnoreCase));
 
     private async Task DisableRvmWorkspaceAsync()
     {

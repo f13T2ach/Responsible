@@ -239,17 +239,11 @@ void FillFileInfo(const UnionEntry& entry, FSP_FSCTL_FILE_INFO* info) {
   info->ChangeTime = entry.last_write_time;
 }
 
-bool ContainsSidCharacters(const std::wstring& sid) {
-  for (wchar_t ch : sid) {
-    if ((ch < L'0' || ch > L'9') && ch != L'-') return false;
-  }
+bool ValidSidString(const std::wstring& sid) {
+  PSID parsed = nullptr;
+  if (sid.empty() || !ConvertStringSidToSidW(sid.c_str(), &parsed)) return false;
+  LocalFree(parsed);
   return true;
-}
-
-bool ValidAppContainerSid(const std::wstring& sid) {
-  static constexpr wchar_t kPrefix[] = L"S-1-15-2-";
-  if (sid.rfind(kPrefix, 0) != 0) return false;
-  return ContainsSidCharacters(sid.substr(std::wcslen(kPrefix)));
 }
 
 Result<std::wstring> CurrentUserSid() {
@@ -874,7 +868,7 @@ Result<std::unique_ptr<MountedWorkspace>> MountedWorkspace::Mount(UnionView* vie
                    "mount point must be a drive letter or an existing directory");
     }
   }
-  if (!options.appcontainer_sid.empty() && !ValidAppContainerSid(options.appcontainer_sid)) {
+  if (!options.appcontainer_sid.empty() && !ValidSidString(options.appcontainer_sid)) {
     return Error(ErrorCode::kInvalidArgument, "AppContainer SID is malformed");
   }
 

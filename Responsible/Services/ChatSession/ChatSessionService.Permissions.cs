@@ -109,8 +109,49 @@ public sealed partial class ChatSessionService
         return new PermissionResult(true, string.Empty);
     }
 
+    // 开启当前工作区的 RVM 隔离保护；settings 为 null 表示沿用已保存的选择。
+    public Task<PermissionResult> EnableRvmProtectionAsync(RvmSettings? settings) =>
+        SetRvmProtectionAsync(true, settings);
+
+    // 修改已保存的 RVM 设置；若该工作区正受保护，重启内核让新 PATH/ACL 生效。
+    public async Task<PermissionResult> UpdateRvmSettingsAsync(string workspaceId, RvmSettings settings)
+    {
+        lock (_gate)
+        {
+            if (_kernelAssistantId is not null)
+                return new PermissionResult(false, "当前回复尚未结束，无法修改 RVM 设置。");
+        }
+
+        var previous = _workspaceStore.All.FirstOrDefault(item => item.Id == workspaceId);
+        if (previous is null) return new PermissionResult(false, "找不到该工作区。");
+
+        var updated = previous with
+        {
+            RvmEnvironment = settings.Environment,
+            RvmTools = settings.Tools,
+            RvmConfigured = true,
+        };
+        _workspaceStore.Add(updated);
+        if (!updated.RvmProtected || WorkspaceForCwd(CurrentCwd())?.Id != workspaceId)
+        {
+            PermissionsChanged?.Invoke();
+            return new PermissionResult(true, string.Empty);
+        }
+
+        ResetPermissions(keepCatalog: true);
+        var restart = await RestartKernelAsync().ConfigureAwait(false);
+        if (!restart.Restarted)
+        {
+            _workspaceStore.Add(previous);
+            PermissionsChanged?.Invoke();
+            return new PermissionResult(false, $"保存 RVM 设置失败：{restart.Message}");
+        }
+        PermissionsChanged?.Invoke();
+        return new PermissionResult(true, string.Empty);
+    }
+
     // 开启/关闭当前工作区的 RVM 隔离保护，持久化到工作区清单并重启内核以重建绑定。
-    public async Task<PermissionResult> SetRvmProtectionAsync(bool enabled)
+    private async Task<PermissionResult> SetRvmProtectionAsync(bool enabled, RvmSettings? settings = null)
     {
         lock (_gate)
         {
@@ -129,10 +170,21 @@ public sealed partial class ChatSessionService
                 Guid.NewGuid().ToString("n"), name, cwd, [cwd], false);
         }
 
-        if (definition.RvmProtected == enabled)
+        if (definition.RvmProtected == enabled && settings is null)
         {
             PermissionsChanged?.Invoke();
             return new PermissionResult(true, string.Empty);
+        }
+
+        var previous = definition;
+        if (settings is not null)
+        {
+            definition = definition with
+            {
+                RvmEnvironment = settings.Environment,
+                RvmTools = settings.Tools,
+                RvmConfigured = true,
+            };
         }
 
         _workspaceStore.Add(definition with { RvmProtected = enabled });
@@ -141,7 +193,7 @@ public sealed partial class ChatSessionService
         if (!restart.Restarted)
         {
             // 启动失败时恢复原状态，避免清单与实际防护不一致
-            _workspaceStore.Add(definition);
+            _workspaceStore.Add(previous);
             PermissionsChanged?.Invoke();
             return new PermissionResult(false, $"切换 RVM 隔离保护失败：{restart.Message}");
         }

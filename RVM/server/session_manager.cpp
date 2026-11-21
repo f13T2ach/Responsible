@@ -15,6 +15,9 @@ constexpr std::uint32_t kDefaultMemoryMb = 2048;
 constexpr std::uint32_t kDefaultVcpuCount = 2;
 constexpr std::uint32_t kMinMemoryMb = 256;
 constexpr std::uint32_t kMaxVcpuCount = 64;
+constexpr std::size_t kMaxExposedEnvironment = 64;
+constexpr std::size_t kMaxExposedEnvironmentChars = 64 * 1024;
+constexpr std::size_t kMaxToolPaths = 32;
 
 std::uint64_t NowUnixMs() {
   return static_cast<std::uint64_t>(
@@ -139,6 +142,39 @@ core::Result<v1::Session> SessionManager::Create(const v1::CreateSessionRequest&
     spec.masked_patterns.push_back(std::move(decoded.value()));
   }
 
+  if (static_cast<std::size_t>(request.exposed_environment_size()) > kMaxExposedEnvironment) {
+    return core::Error(core::ErrorCode::kInvalidArgument,
+                       "too many exposed environment variables");
+  }
+  std::size_t exposed_chars = 0;
+  for (const auto& entry : request.exposed_environment()) {
+    if (entry.name().empty() || entry.name().find('=') != std::string::npos ||
+        entry.name().find('\0') != std::string::npos) {
+      return core::Error(core::ErrorCode::kInvalidArgument,
+                         "exposed environment names must be non-empty without '='");
+    }
+    auto name = channel::FromUtf8(entry.name());
+    if (!name.ok()) return name.error();
+    auto value = channel::FromUtf8(entry.value());
+    if (!value.ok()) return value.error();
+    exposed_chars += name.value().size() + value.value().size() + 2;
+    if (exposed_chars > kMaxExposedEnvironmentChars) {
+      return core::Error(core::ErrorCode::kInvalidArgument,
+                         "exposed environment exceeds the size limit");
+    }
+    spec.exposed_environment.emplace_back(std::move(name.value()), std::move(value.value()));
+  }
+
+  if (static_cast<std::size_t>(request.tool_paths_size()) > kMaxToolPaths) {
+    return core::Error(core::ErrorCode::kInvalidArgument, "too many exposed tool paths");
+  }
+  for (const std::string& path : request.tool_paths()) {
+    if (path.empty()) continue;
+    auto decoded = channel::FromUtf8(path);
+    if (!decoded.ok()) return decoded.error();
+    spec.tool_paths.push_back(std::move(decoded.value()));
+  }
+
   auto environment = backend_.Create(spec);
   if (!environment.ok()) return environment.error();
 
@@ -241,6 +277,8 @@ core::Result<ShellContext> SessionManager::DescribeForShell(std::uint64_t sessio
   context.appcontainer_sid = found->second.facts.appcontainer_sid;
   context.temp_path = found->second.facts.temp_path;
   context.restricted_token = found->second.facts.restricted_token;
+  context.exposed_environment = found->second.facts.exposed_environment;
+  context.tool_paths = found->second.facts.tool_paths;
   return context;
 }
 

@@ -23,8 +23,9 @@ struct ShellOutcome {
 
 // Execute one shell request inside a live session's confinement. The working
 // directory is translated from the host workspace root onto the session's
-// virtual root; request environments are forwarded verbatim (callers scrub).
-// Cancellation is polled while the child runs and kills the whole job.
+// virtual root. The child environment is built by the engine (sandbox TEMP,
+// clean PATH, user-exposed variables only); caller-provided environments are
+// ignored. Cancellation is polled while the child runs and kills the whole job.
 core::Result<ShellOutcome> RunShell(const ShellContext& context,
                                     const v1::ShellExecRequest& request,
                                     const std::function<bool()>& should_cancel);

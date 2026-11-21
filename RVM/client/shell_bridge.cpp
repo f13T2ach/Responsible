@@ -26,7 +26,6 @@ constexpr int kExitCancelled = 130;
 constexpr std::uint64_t kHelloRequestId = 1;
 constexpr std::uint64_t kExecRequestId = 2;
 constexpr std::uint32_t kDefaultTimeoutMs = 600000;
-constexpr std::size_t kMaxEnvironmentChars = 1024 * 1024;
 
 void Report(const std::string& message) {
   const HANDLE error = GetStdHandle(STD_ERROR_HANDLE);
@@ -67,29 +66,6 @@ std::wstring EnvironmentValue(const wchar_t* name) {
 std::string WideToUtf8OrEmpty(const std::wstring& value) {
   auto converted = channel::ToUtf8(value);
   return converted.ok() ? converted.Take() : std::string();
-}
-
-void ForwardEnvironment(v1::ShellExecRequest* request) {
-  wchar_t* block = GetEnvironmentStringsW();
-  if (block == nullptr) return;
-  std::size_t total = 0;
-  for (const wchar_t* entry = block; *entry != L'\0'; entry += wcslen(entry) + 1) {
-    if (*entry == L'=') continue;  // drive-cwd pseudo variables
-    const wchar_t* equals = wcschr(entry, L'=');
-    if (equals == nullptr || equals == entry) continue;
-    const std::wstring name(entry, static_cast<std::size_t>(equals - entry));
-    // The bridge credentials are for this process only; never hand them to the
-    // command it runs.
-    if (name.rfind(L"RESPONSIBLE_RVM_", 0) == 0) continue;
-    const std::wstring value(equals + 1);
-    auto utf8_name = channel::ToUtf8(name);
-    auto utf8_value = channel::ToUtf8(value);
-    if (!utf8_name.ok() || !utf8_value.ok()) continue;
-    total += utf8_name.value().size() + utf8_value.value().size() + 2;
-    if (total > kMaxEnvironmentChars || request->env_size() >= 512) break;
-    (*request->mutable_env())[utf8_name.value()] = utf8_value.value();
-  }
-  FreeEnvironmentStringsW(block);
 }
 
 HANDLE ConnectPipe(const std::wstring& pipe_name) {
@@ -208,7 +184,6 @@ int RunShellBridge(int argc, wchar_t** argv) {
   request->set_workdir(WideToUtf8OrEmpty(std::wstring(workdir, workdir_size)));
   request->set_timeout_ms(timeout_ms);
   for (const std::wstring& arg : command) request->add_argv(WideToUtf8OrEmpty(arg));
-  ForwardEnvironment(request);
   if (!SendRequest(pipe, exec)) {
     Report("failed to send the shell request");
     CloseHandle(pipe);

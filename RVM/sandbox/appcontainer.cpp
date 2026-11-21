@@ -17,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/log.h"
+
 namespace rvm::sandbox {
 namespace {
 
@@ -257,6 +259,11 @@ core::Status GrantDirectory(const std::wstring& sid, const std::wstring& path, b
   return GrantPathRights(sid, path, rights, inherit);
 }
 
+core::Status GrantDirectoryReadExecute(const std::wstring& sid, const std::wstring& path,
+                                       bool inherit) {
+  return GrantPathRights(sid, path, GENERIC_READ | GENERIC_EXECUTE | FILE_TRAVERSE, inherit);
+}
+
 core::Status GrantTraverseAncestors(const std::wstring& sid, const std::wstring& path,
                                     std::vector<std::wstring>* granted) {
   const std::filesystem::path root(path);
@@ -264,6 +271,9 @@ core::Status GrantTraverseAncestors(const std::wstring& sid, const std::wstring&
   for (std::filesystem::path current = root.parent_path(); !current.empty();
        current = current.parent_path()) {
     if (!std::filesystem::is_directory(current, error) || error) break;
+    const std::wstring current_text = current.wstring();
+    core::LogDebug("appcontainer", "grant traverse " +
+                                       std::string(current_text.begin(), current_text.end()));
     const core::Status entry =
         GrantPathRights(sid, current.wstring(), FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
                         false);
@@ -324,23 +334,27 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
     return core::Error(core::ErrorCode::kInvalidArgument, "command line is required");
   }
   const bool appcontainer = options.containment == Containment::kAppContainer;
-  if (appcontainer && options.appcontainer_sid.empty()) {
+  if (options.appcontainer_sid.empty()) {
     return core::Error(core::ErrorCode::kInvalidArgument,
-                       "command line and AppContainer SID are required");
+                       "a sandbox SID is required for every containment mode");
   }
 
   ScopedHandles handles;
   PSID sid = nullptr;
   std::unique_ptr<void, decltype(&LocalFree)> sid_guard(nullptr, &LocalFree);
-  if (appcontainer) {
-    if (!ConvertStringSidToSidW(options.appcontainer_sid.c_str(), &sid)) {
-      return core::Error(core::ErrorCode::kInvalidArgument, "AppContainer SID is not valid", false,
-                         LastErrorDetail(GetLastError()));
-    }
-    sid_guard.reset(sid);
-  } else {
+  if (!ConvertStringSidToSidW(options.appcontainer_sid.c_str(), &sid)) {
+    return core::Error(core::ErrorCode::kInvalidArgument, "sandbox SID is not valid", false,
+                       LastErrorDetail(GetLastError()));
+  }
+  sid_guard.reset(sid);
+
+  if (!appcontainer) {
     // AppContainer cannot open WinFsp volumes (winfsp/winfsp#705), so mounted
-    // workspaces run under a privilege-stripped restricted token instead.
+    // workspaces run under a restricted token. Access must satisfy both the
+    // normal token check and a restricting check that only accepts
+    // BUILTIN\Users (OS binaries) or the session SID granted on the
+    // workspace/temp/tools. The host user profile grants neither to the
+    // restriction, so it stays unreadable.
     HANDLE self = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY,
                           &self)) {
@@ -348,8 +362,38 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
                          "failed to open the process token for the sandbox", false,
                          LastErrorDetail(GetLastError()));
     }
-    const BOOL restricted = CreateRestrictedToken(self, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0,
-                                                  nullptr, 0, nullptr, &handles.token);
+
+    DWORD token_is_restricted = 0;
+    DWORD token_info_size = 0;
+    if (GetTokenInformation(self, TokenIsRestricted, &token_is_restricted,
+                            sizeof(token_is_restricted), &token_info_size)) {
+      core::LogDebug("sandbox", std::string("engine token restricted=") +
+                                    (token_is_restricted != 0 ? "true" : "false"));
+    }
+
+    BYTE users_buffer[SECURITY_MAX_SID_SIZE] = {};
+    DWORD users_size = sizeof(users_buffer);
+    if (!CreateWellKnownSid(WinBuiltinUsersSid, nullptr, users_buffer, &users_size)) {
+      const DWORD error = GetLastError();
+      CloseHandle(self);
+      return core::Error(core::ErrorCode::kBackendFailed,
+                         "failed to build the sandbox restricting SID", false,
+                         LastErrorDetail(error));
+    }
+
+    // AppContainer SIDs are rejected by CreateRestrictedToken, so only attach
+    // the session SID when it is a regular SID.
+    SID_AND_ATTRIBUTES restricting[2] = {{users_buffer, 0}, {sid, 0}};
+    DWORD restricting_count = 2;
+    BOOL restricted = CreateRestrictedToken(self, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr,
+                                            restricting_count, restricting, &handles.token);
+    if (!restricted && GetLastError() == ERROR_INVALID_PARAMETER) {
+      core::LogWarn("sandbox",
+                    "session SID rejected as a restricting SID; falling back to BUILTIN\\Users");
+      restricting_count = 1;
+      restricted = CreateRestrictedToken(self, DISABLE_MAX_PRIVILEGE, 0, nullptr, 0, nullptr,
+                                         restricting_count, restricting, &handles.token);
+    }
     const DWORD token_error = GetLastError();
     CloseHandle(self);
     if (!restricted) {

@@ -3,6 +3,15 @@ using System.Text.Json.Serialization;
 
 namespace Responsible.Services;
 
+// 用户在 RVM 设置里显式选择的环境变量名与工具目录。只持久化名称/路径，
+// 环境变量的值在每次建会话时从宿主进程读取，避免把机密写进清单。
+public sealed record RvmSettings(
+    IReadOnlyList<string> Environment,
+    IReadOnlyList<string> Tools)
+{
+    public static RvmSettings Empty { get; } = new([], []);
+}
+
 // 本地工作区定义：名称、主目录（新会话的 cwd）与可读写源文件夹。
 // RvmProtected 只有在用户显式开启 RVM 隔离保护后才为 true。
 public sealed record WorkspaceDefinition(
@@ -10,10 +19,22 @@ public sealed record WorkspaceDefinition(
     string Name,
     string Directory,
     IReadOnlyList<string> Folders,
-    bool RvmProtected = false)
+    bool RvmProtected = false,
+    IReadOnlyList<string>? RvmEnvironment = null,
+    IReadOnlyList<string>? RvmTools = null,
+    bool RvmConfigured = false)
 {
     [JsonIgnore]
     public string RvmKey => WorkspaceNames.RvmKey(Name, Id);
+
+    [JsonIgnore]
+    public IReadOnlyList<string> ExposedEnvironment => RvmEnvironment ?? [];
+
+    [JsonIgnore]
+    public IReadOnlyList<string> ExposedTools => RvmTools ?? [];
+
+    [JsonIgnore]
+    public RvmSettings Settings => new(ExposedEnvironment, ExposedTools);
 }
 
 // 工作区名同时用于界面与 RVM 存储目录（RVM/<名称>_<id>），因此在这里统一约束。

@@ -22,17 +22,21 @@ core::Status DeleteProfile(std::wstring_view name);
 
 core::Status GrantDirectory(const std::wstring& sid, const std::wstring& path, bool write,
                             bool inherit);
+// Read/execute only: used for user-exposed tool directories so a sandboxed
+// process can launch them without gaining write access to the toolchain.
+core::Status GrantDirectoryReadExecute(const std::wstring& sid, const std::wstring& path,
+                                       bool inherit);
 core::Status RevokeDirectory(const std::wstring& sid, const std::wstring& path, bool inherit);
 core::Status GrantTraverseAncestors(const std::wstring& sid, const std::wstring& path,
                                     std::vector<std::wstring>* granted);
 
 enum class Containment {
-  // Full AppContainer token. Requires a workspace the AppContainer can reach;
-  // WinFsp volumes currently reject AppContainer opens at the device layer
-  // (winfsp/winfsp#705), so mounts use kRestrictedToken instead.
+  // Full AppContainer token: DACL isolation, no host profile or host temp
+  // access unless an explicit grant exists.
   kAppContainer,
-  // Restricted token (DISABLE_MAX_PRIVILEGE) inside a job object. Compatible
-  // with WinFsp volumes and common toolchains; DACL isolation is not applied.
+  // Privilege-stripped restricted token inside a job object. Kept only as a
+  // fallback for hosts whose WinFsp volume rejects AppContainer opens
+  // (winfsp/winfsp#705); it does not provide DACL isolation.
   kRestrictedToken,
 };
 

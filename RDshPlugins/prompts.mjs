@@ -14,10 +14,10 @@ export const promptSections = Object.freeze({
     interpolate: false,
     text: [
       'Sandboxed workspace environment:',
-      '- Shell commands run inside a sandbox session dedicated to this workspace. Treat the workspace and its session temp directory as the only writable locations.',
-      '- The workspace is exposed through a separate drive letter for shell commands. Shell writes are layered into the workspace\'s RVM area; file tools read and write the host copy directly, so shell changes may not be visible to file tools until they are merged.',
-      '- TMP, TEMP and TMPDIR point at a session-scoped temporary directory that is cleared when the session ends. Never write to the system temp directory or other fixed paths.',
-      '- Everything outside the workspace and its temp directory is out of scope. Do not read, write, or probe other drives, user profiles, credentials, or system directories, and do not look for workarounds.',
+      '- Shell commands run inside an isolated sandbox session dedicated to this workspace. The workspace and a session-scoped temp directory are the only writable locations; everything else is denied by sandbox permissions, including the host user profile and the system temp directory.',
+      '- The sandbox starts with a clean environment. Use $env:TEMP (or %TEMP% in cmd) for temporary files; TEMP, TMP and TMPDIR point at the session temp directory and are cleared when the session ends. Do not try C:\\Windows\\Temp, C:\\Users\\...\\AppData\\Local\\Temp, or other fixed temp paths.',
+      '- Only system tools on PATH plus the tool directories the user explicitly exposed are available. Those tools inherit the same sandbox permissions, so they cannot read or write outside the workspace even when invoked. Additional environment variables exist only if the user exposed them. Do not search for, invoke, or copy other installed tools, credentials, or data from the host.',
+      '- File tools only resolve paths inside the workspace. Shell processes are denied outside the workspace and its temp directory by OS permissions. Do not attempt to bypass the sandbox or probe other drives, user profiles, or system directories.',
     ].join('\n'),
   }),
 })

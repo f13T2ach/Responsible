@@ -13,6 +13,11 @@ enum SessionState {
   SESSION_STATE_FAILED = 5;
 }
 
+message ExposedVariable {
+  string name = 1;
+  string value = 2;
+}
+
 message CreateSessionRequest {
   string client_id = 1;
   string workspace_root = 2;
@@ -27,6 +32,12 @@ message CreateSessionRequest {
   // Stable per-workspace storage name (`<workspace>_<id>`); empty keeps the
   // legacy per-session scratch directory.
   string storage_key = 11;
+  // Environment variables the user chose to expose to sandboxed processes.
+  // The engine builds the rest of the child environment itself.
+  repeated ExposedVariable exposed_environment = 12;
+  // Tool directories the user explicitly exposes. The engine grants the
+  // sandbox identity read/execute on these paths and prepends them to PATH.
+  repeated string tool_paths = 13;
 }
 
 message Session {

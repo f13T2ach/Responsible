@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/policy.h"
@@ -40,6 +41,10 @@ struct EnvironmentSpec {
   // out the real directory. Empty overlay_drive picks the first free letter.
   bool overlay_workspace = false;
   std::wstring overlay_drive;
+  // User-exposed environment (name/value) and tool directories. Tool dirs are
+  // granted read/execute to the sandbox identity and prepended to PATH.
+  std::vector<std::pair<std::wstring, std::wstring>> exposed_environment;
+  std::vector<std::wstring> tool_paths;
 };
 
 struct EnvironmentFacts {
@@ -52,11 +57,12 @@ struct EnvironmentFacts {
   std::wstring workspace_path;  // where the session sees the workspace
   // Session-scoped temp directory handed to shell children via TMP/TEMP/TMPDIR.
   std::wstring temp_path;
-  // AppContainer SID granted access for direct (NTFS) workspaces.
+  // AppContainer SID granted access to the workspace, temp and exposed tools.
   std::wstring appcontainer_sid;
-  // Overlay workspaces run under a restricted token instead: WinFsp volumes
-  // reject AppContainer opens (winfsp#705), so DACL isolation does not apply.
+  // Only set when the host falls back to a restricted token (no DACL isolation).
   bool restricted_token = false;
+  std::vector<std::pair<std::wstring, std::wstring>> exposed_environment;
+  std::vector<std::wstring> tool_paths;
 };
 
 class IEnvironment {

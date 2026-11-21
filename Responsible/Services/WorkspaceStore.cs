@@ -72,7 +72,10 @@ public sealed class WorkspaceStore : IWorkspaceStore
                         .Where(folder => !string.IsNullOrWhiteSpace(folder))
                         .Select(folder => folder!)
                         .ToArray(),
-                    row.RvmProtected))
+                    row.RvmProtected,
+                    Clean(row.RvmEnvironment),
+                    Clean(row.RvmTools),
+                    row.RvmConfigured))
                 .ToList();
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -81,10 +84,20 @@ public sealed class WorkspaceStore : IWorkspaceStore
         }
     }
 
+    // 旧清单没有 RVM 设置字段：缺省即“从未配置”，首次开启保护时会提示选择。
+    private static IReadOnlyList<string> Clean(IReadOnlyList<string?>? values) =>
+        (values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!)
+            .ToArray();
+
     private sealed record WorkspaceRow(
         string? Id,
         string? Name,
         string? Directory,
         IReadOnlyList<string?>? Folders,
-        bool RvmProtected = false);
+        bool RvmProtected = false,
+        IReadOnlyList<string?>? RvmEnvironment = null,
+        IReadOnlyList<string?>? RvmTools = null,
+        bool RvmConfigured = false);
 }

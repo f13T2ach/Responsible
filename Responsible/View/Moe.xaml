@@ -283,6 +283,10 @@
                                                                 <ui:MenuItem Header="在资源管理器中打开"
                                                                              Icon="{ui:SymbolIcon Symbol=FolderOpen24}"
                                                                              Command="{Binding OpenFolderCommand}" />
+                                                                <ui:MenuItem Header="RVM 设置"
+                                                                             Icon="{ui:SymbolIcon Symbol=Shield24}"
+                                                                             Command="{Binding EditRvmSettingsCommand}"
+                                                                             Visibility="{Binding CanConfigureRvm, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                                 <Separator />
                                                                 <ui:MenuItem Header="从侧栏移除"
                                                                              Icon="{ui:SymbolIcon Symbol=DeleteDismiss24}"

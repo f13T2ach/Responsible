@@ -3,6 +3,7 @@
 #include <shellapi.h>
 
 #include <fstream>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <iterator>
@@ -194,6 +195,18 @@ int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argu
                                                   profile.value().sid.end())
             << '\n';
 
+  // AppContainer SIDs cannot be used as restricting SIDs; the smoke mirrors the
+  // engine and restricts to BUILTIN\Users plus a synthetic session SID.
+  std::uint64_t sid_seed = GetTickCount64() ^
+                           (static_cast<std::uint64_t>(GetCurrentProcessId()) << 32);
+  std::wstring restricted_sid = L"S-1-5-21";
+  for (int i = 0; i < 4; ++i) {
+    sid_seed = sid_seed * 6364136223846793005ull + 1442695040888963407ull;
+    restricted_sid += L"-" + std::to_wstring((sid_seed >> 33) | 1ull);
+  }
+  std::cout << "restricted_sid=" << std::string(restricted_sid.begin(), restricted_sid.end())
+            << '\n';
+
   rvm::workspace::UnionPaths union_paths;
   union_paths.base_root = base_root.wstring();
   union_paths.diff_root = diff_root.wstring();
@@ -209,7 +222,7 @@ int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argu
 
   rvm::workspace::MountOptions mount_options;
   mount_options.mount_point = drive;
-  mount_options.appcontainer_sid = profile.value().sid;
+  mount_options.appcontainer_sid = restricted_sid;
   auto mounted = rvm::workspace::MountedWorkspace::Mount(&view, mount_options);
   if (!mounted.ok()) {
     PrintError(mounted.error());
@@ -227,6 +240,7 @@ int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argu
                          new_drive_path + L" & del /f /q " + new_drive_path + L" & dir /b " +
                          drive + L"\\\"";
   options.working_directory = drive + L"\\";
+  options.appcontainer_sid = restricted_sid;
   options.containment = rvm::sandbox::Containment::kRestrictedToken;
   options.timeout_ms = 60000;
   options.memory_limit_bytes = 2ull * 1024 * 1024 * 1024;

@@ -1,22 +1,30 @@
 // RVM 沙箱提供者：替换 DSH 自带的 same-world sandbox 服务，把 shell 子进程包进
 // `RvmEngine.exe --shell-bridge`，由引擎在自己的 AppContainer 会话里执行。
 //
-// 真实边界（如实上报）：argv 与 cwd 经引擎转发到会话叠加盘，进程在引擎会话的容器
-// 里运行；但本次改造尚未接管 fs_* 工具，宿主文件操作仍直连磁盘，因此 enforcement
-// 固定为 partial，不伪造 full。
+// 真实边界（如实上报）：shell 进程受内核 ACL/AppContainer 约束；fs_* 工具在宿主进程里
+// 运行，靠本插件对 ctx.fs.resolve 的包含性检查把目标限制在工作区内（策略检查，不是内核
+// 边界），因此 enforcement 仍为 partial，不伪造 full。
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { promptSections } from './prompts.mjs'
 
 export const name = 'rvm-sandbox'
 
-export const inject = ['systemPrompt']
+export const inject = ['systemPrompt', 'fs']
 
 const RUNNER_SIGNATURE = 'RVM_SANDBOX_UNAVAILABLE'
 
 function normalizeRoot(root) {
   return resolve(root).replace(/[\\/]+$/, '').toLowerCase()
+}
+
+// The model-facing fs tools resolve every model path here before touching disk.
+// Confining resolve confines reads, list/stat, image reads and mutations alike.
+function isInsideRoot(root, hostPath) {
+  if (typeof hostPath !== 'string' || hostPath === '') return false
+  const value = resolve(hostPath).replace(/[\\/]+$/, '').toLowerCase()
+  return value === root || value.startsWith(`${root}${sep}`)
 }
 
 function requiredString(config, key) {
@@ -106,4 +114,20 @@ export async function apply(ctx, config = {}) {
       void provider
     }
   })
+
+  // One choke point: every fs tool target is resolved through ctx.fs.resolve.
+  if (workspaceRoot !== undefined && ctx.fs !== undefined) {
+    const fs = ctx.fs
+    const root = normalizeRoot(workspaceRoot)
+    const originalResolve = fs.resolve.bind(fs)
+    fs.resolve = async (path, opts) => {
+      const target = await originalResolve(path, opts)
+      const host = target?.targetKey ?? target?.displayPath
+      if (!isInsideRoot(root, host)) {
+        throw new Error(
+          `RVM sandbox: "${target?.displayPath ?? path}" is outside the workspace ${workspaceRoot}`)
+      }
+      return target
+    }
+  }
 }

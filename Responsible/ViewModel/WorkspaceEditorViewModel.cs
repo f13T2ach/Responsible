@@ -28,10 +28,32 @@ public partial class WorkspaceEditorViewModel : ObservableObject
     private bool _rvmProtection;
 
     [ObservableProperty]
+    private bool _rvmSettingsOpen;
+
+    [ObservableProperty]
+    private bool _isRvmSkipWarningVisible;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasError))]
     private string _errorText = string.Empty;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorText);
+
+    public RvmSettingsViewModel RvmSettings { get; } = new();
+
+    partial void OnRvmProtectionChanged(bool value)
+    {
+        if (value) return;
+        RvmSettingsOpen = false;
+        IsRvmSkipWarningVisible = false;
+    }
+
+    partial void OnRvmSettingsOpenChanged(bool value)
+    {
+        if (!value) return;
+        RvmSettings.Touched = true;
+        IsRvmSkipWarningVisible = false;
+    }
 
     partial void OnNameChanged(string value)
     {
@@ -89,9 +111,27 @@ public partial class WorkspaceEditorViewModel : ObservableObject
             ErrorText = invalid;
             return;
         }
+        // 开着隔离但从没打开设置：先提醒 AI 可能用不了本机工具。
+        if (RvmProtection && !RvmSettings.Touched && !RvmSettings.Configured)
+        {
+            IsRvmSkipWarningVisible = true;
+            return;
+        }
+        ErrorText = string.Empty;
+        IsRvmSkipWarningVisible = false;
+        SaveRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private void ContinueWithoutRvmSettings()
+    {
+        IsRvmSkipWarningVisible = false;
         ErrorText = string.Empty;
         SaveRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    [RelayCommand]
+    private void DismissRvmWarning() => IsRvmSkipWarningVisible = false;
 
     [RelayCommand]
     private void Cancel() => CancelRequested?.Invoke(this, EventArgs.Empty);
@@ -99,8 +139,10 @@ public partial class WorkspaceEditorViewModel : ObservableObject
     public WorkspaceDefinition Build()
     {
         var folders = Folders.Select(item => item.Path).ToArray();
+        var settings = RvmProtection ? RvmSettings.Build() : Responsible.Services.RvmSettings.Empty;
         return new WorkspaceDefinition(
-            Guid.NewGuid().ToString("n"), Name.Trim(), folders[0], folders, RvmProtection);
+            Guid.NewGuid().ToString("n"), Name.Trim(), folders[0], folders, RvmProtection,
+            settings.Environment, settings.Tools, RvmProtection && RvmSettings.Touched);
     }
 
     public void Reset()
@@ -108,6 +150,9 @@ public partial class WorkspaceEditorViewModel : ObservableObject
         Folders.Clear();
         Name = string.Empty;
         RvmProtection = false;
+        RvmSettingsOpen = false;
+        IsRvmSkipWarningVisible = false;
+        RvmSettings.Reset();
         ErrorText = string.Empty;
         SelectedLocation = LocationOptions[0];
     }

@@ -9,6 +9,7 @@ using Responsible.ExView;
 using Responsible.Messages;
 using Responsible.MoeViews.Plugins;
 using Responsible.Services;
+using Responsible.View;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
 
@@ -190,7 +191,9 @@ public partial class MoeViewModel : ObservableObject
                 NewConversationInWorkspace,
                 OpenWorkspaceFolder,
                 RemoveWorkspace,
-                canStart: CanCreate);
+                canStart: CanCreate,
+                rvmProtected: definition.RvmProtected,
+                rvmSettings: EditWorkspaceRvmSettings);
             foreach (var row in rows
                          .Where(row => MatchesWorkingDirectory(row.Cwd, definition.Folders))
                          .OrderByDescending(row => row.UpdatedAt))
@@ -339,7 +342,11 @@ public partial class MoeViewModel : ObservableObject
 
     private bool CanSendPrompt() => !IsSessionLoading && !string.IsNullOrWhiteSpace(PromptText);
 
-    private void OnPermissionsChanged() => Ui(RefreshPermissionUi);
+    private void OnPermissionsChanged() => Ui(() =>
+    {
+        RefreshPermissionUi();
+        RebuildWorkspaces(_lastRows);
+    });
 
     private void OnSessionLoadingChanged(bool loading) => Ui(() => IsSessionLoading = loading);
 
@@ -432,27 +439,103 @@ public partial class MoeViewModel : ObservableObject
     private async Task SelectPermission(PermissionOptionViewModel? option)
     {
         if (option is null) return;
-        // 受 RVM 保护时，点击同一个 DSH preset 也意味着关闭保护；点击 RVM 项本身则无需重复切换
-        if (option.IsRvmProtection ? Session.IsRvmProtected
-            : option.Value == Session.PermissionValue && !Session.IsRvmProtected) return;
+
+        if (option.IsRvmProtection)
+        {
+            if (Session.IsRvmProtected) return;
+            var current = Session.CurrentWorkspace;
+            RvmSettings? settings = null;
+            // 此工作区从未配置过：开启保护时先让用户决定暴露哪些环境变量/工具
+            if (current is null || !current.RvmConfigured)
+            {
+                settings = await ShowRvmSettingsDialogAsync("开启 RVM 隔离保护", current);
+                if (settings is null && !await ConfirmRvmSkipSettingsAsync()) return;
+            }
+
+            var enabled = await Session.EnableRvmProtectionAsync(settings);
+            if (enabled.Ok)
+            {
+                RebuildWorkspaces(_lastRows);
+                return;
+            }
+            await ShowFailureAsync("开启 RVM 隔离保护失败", enabled.Message);
+            return;
+        }
+
+        // 受 RVM 保护时，点击同一个 DSH preset 也意味着关闭保护
+        if (option.Value == Session.PermissionValue && !Session.IsRvmProtected) return;
         if ((option.Value is "danger-full-access" or "auto") && !await ConfirmPermissionRiskAsync(option))
             return;
 
         var result = await Session.SelectPermissionAsync(option.Value);
         if (result.Ok) return;
-        await ShowDialogAsync(new ContentDialog
+        await ShowFailureAsync("切换权限失败", result.Message);
+    }
+
+    private void EditWorkspaceRvmSettings(WorkspaceItemViewModel item) =>
+        _ = EditWorkspaceRvmSettingsAsync(item);
+
+    private async Task EditWorkspaceRvmSettingsAsync(WorkspaceItemViewModel item)
+    {
+        if (item.DefinitionId is not { Length: > 0 } id) return;
+        var definition = _workspaceStore.All.FirstOrDefault(workspace => workspace.Id == id);
+        if (definition is null) return;
+
+        var settings = await ShowRvmSettingsDialogAsync("RVM 设置", definition);
+        if (settings is null) return;
+        var result = await Session.UpdateRvmSettingsAsync(id, settings);
+        if (result.Ok) return;
+        await ShowFailureAsync("保存 RVM 设置失败", result.Message);
+    }
+
+    private async Task<RvmSettings?> ShowRvmSettingsDialogAsync(string title, WorkspaceDefinition? definition)
+    {
+        var viewModel = new RvmSettingsViewModel();
+        viewModel.Load(definition?.ExposedEnvironment ?? [], definition?.ExposedTools ?? [],
+            definition?.RvmConfigured ?? false);
+        var dialog = new ContentDialog
         {
-            Title = "切换权限失败",
+            Title = title,
+            Content = new RvmSettingsView { DataContext = viewModel },
+            PrimaryButtonText = "保存",
+            CloseButtonText = "取消",
+            DialogWidth = 700,
+            DialogHeight = 620,
+        };
+        return await ShowDialogAsync(dialog) == ContentDialogResult.Primary ? viewModel.Build() : null;
+    }
+
+    private async Task<bool> ConfirmRvmSkipSettingsAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "AI 受到隔离",
             Content = new System.Windows.Controls.TextBlock
             {
-                Text = result.Message,
+                Text = "AI 受到隔离，可能无法使用你安装在本机的工具，确定不额外提供吗？",
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "仍然开启",
+            CloseButtonText = "返回",
+            DialogWidth = 480,
+            DialogHeight = 280,
+        };
+        return await ShowDialogAsync(dialog) == ContentDialogResult.Primary;
+    }
+
+    private Task ShowFailureAsync(string title, string message) =>
+        ShowDialogAsync(new ContentDialog
+        {
+            Title = title,
+            Content = new System.Windows.Controls.TextBlock
+            {
+                Text = message,
                 TextWrapping = System.Windows.TextWrapping.Wrap,
             },
             CloseButtonText = "知道了",
-            DialogWidth = 420,
-            DialogHeight = 220,
+            DialogWidth = 440,
+            DialogHeight = 240,
         });
-    }
 
     // 与 DSH 的 RiskConfirmation 一致：必须勾选风险确认后才能启用完全权限 / 自动审查
     private async Task<bool> ConfirmPermissionRiskAsync(PermissionOptionViewModel option)

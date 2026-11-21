@@ -9,6 +9,7 @@ public partial class WorkspaceItemViewModel : ObservableObject
     private readonly Action<WorkspaceItemViewModel>? _newConversation;
     private readonly Action<WorkspaceItemViewModel>? _openFolder;
     private readonly Action<WorkspaceItemViewModel>? _remove;
+    private readonly Action<WorkspaceItemViewModel>? _rvmSettings;
     private readonly Func<bool>? _canStart;
 
     public WorkspaceItemViewModel(
@@ -18,14 +19,18 @@ public partial class WorkspaceItemViewModel : ObservableObject
         Action<WorkspaceItemViewModel>? newConversation = null,
         Action<WorkspaceItemViewModel>? openFolder = null,
         Action<WorkspaceItemViewModel>? remove = null,
-        Func<bool>? canStart = null)
+        Func<bool>? canStart = null,
+        bool rvmProtected = false,
+        Action<WorkspaceItemViewModel>? rvmSettings = null)
     {
         Name = name;
         Cwd = cwd;
         DefinitionId = definitionId;
+        IsRvmProtected = rvmProtected;
         _newConversation = newConversation;
         _openFolder = openFolder;
         _remove = remove;
+        _rvmSettings = rvmSettings;
         _canStart = canStart;
     }
 
@@ -36,6 +41,10 @@ public partial class WorkspaceItemViewModel : ObservableObject
     public string? DefinitionId { get; }
 
     public bool IsCustom => DefinitionId is not null;
+
+    public bool IsRvmProtected { get; }
+
+    public bool CanConfigureRvm => IsCustom && IsRvmProtected;
 
     public string Key => DefinitionId ?? $"cwd:{Cwd}";
 
@@ -54,4 +63,7 @@ public partial class WorkspaceItemViewModel : ObservableObject
 
     [RelayCommand]
     private void RemoveFromSidebar() => _remove?.Invoke(this);
+
+    [RelayCommand]
+    private void EditRvmSettings() => _rvmSettings?.Invoke(this);
 }
