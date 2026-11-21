@@ -17,7 +17,7 @@ export const promptSections = Object.freeze({
       '- Shell commands run inside a sandbox session dedicated to this workspace. Treat the workspace and its session temp directory as the only writable locations.',
       '- The workspace is exposed through a separate drive letter for shell commands. Shell writes are layered into the workspace\'s RVM area; file tools read and write the host copy directly, so shell changes may not be visible to file tools until they are merged.',
       '- TMP, TEMP and TMPDIR point at a session-scoped temporary directory that is cleared when the session ends. Never write to the system temp directory or other fixed paths.',
-      '- Reading or writing outside the workspace (other drives, user profiles, credentials, system directories) is denied. Do not attempt workarounds.',
+      '- Everything outside the workspace and its temp directory is out of scope. Do not read, write, or probe other drives, user profiles, credentials, or system directories, and do not look for workarounds.',
     ].join('\n'),
   }),
 })

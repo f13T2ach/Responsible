@@ -121,7 +121,7 @@ public sealed class RvmEngineService : IRvmEngineService
             if (!_connected) return;
             var body = new List<byte>();
             RvmProto.AddVarint(body, 1, sessionId);
-            RvmProto.AddBool(body, 2, false); // keep_diff：本版 diff 为会话级
+            RvmProto.AddBool(body, 2, true); // keep_diff：diff 按工作区保留，会话只卸载叠加盘
             RvmProto.AddString(body, 3, "workspace switch");
             await RequestAsync(body, 21, cancellationToken).ConfigureAwait(false);
         }
