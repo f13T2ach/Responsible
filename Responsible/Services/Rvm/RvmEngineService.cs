@@ -3,7 +3,6 @@ using System.IO;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text;
-
 namespace Responsible.Services;
 
 // 宿主侧 RVM 引擎客户端：启动 RvmEngine.exe，经命名管道完成握手与会话生命周期。
@@ -15,12 +14,31 @@ public sealed class RvmEngineService : IRvmEngineService
     private const ushort FrameRequest = 1;
     private const ushort FrameResponse = 2;
     private const uint MaxPayloadBytes = 8 * 1024 * 1024;
+    // 串行化后最多只有一个在途请求，迟到回包数量有界；用它防止错帧时死等
+    private const int MaxStaleResponses = 8;
     private const int ConnectTimeoutMs = 30000;
     private const int RequestTimeoutMs = 120000;
+
+    // 引擎接受 shutdown 之后的收尾预算。正常收尾是毫秒级（实测 3-30ms），这个上限只处理一种外部无法区分的情况：
+    // 引擎卡在收尾里时，“还在收尾”和“已经卡死”在宿主侧看到的是同一个状态（进程还活着、通道已关闭），
+    // 所以只能给收尾一个上限；超过即认定引擎无法自愈，结束进程树。可经环境变量覆盖，0 表示不设上限。
+    private static readonly TimeSpan EngineTeardownBudget = ReadTeardownBudget();
+
+    private static TimeSpan ReadTeardownBudget()
+    {
+        var configured = Environment.GetEnvironmentVariable("RESPONSIBLE_RVM_TEARDOWN_BUDGET_MS");
+        if (int.TryParse(configured, out var ms)) return TimeSpan.FromMilliseconds(Math.Max(0, ms));
+        return TimeSpan.FromSeconds(10);
+    }
 
     private static readonly byte[] Magic = "RVM1"u8.ToArray();
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _lifecycleLock = new();
+    // 停止态：拒绝新请求，并取消在途/排队的 RPC，让关闭流程等的是状态迁移而不是时间
+    private volatile bool _stopping;
+    private readonly CancellationTokenSource _abortCts = new();
+    private Task? _shutdownTask;
     private readonly StringBuilder _engineOutput = new();
     private NamedPipeClientStream? _pipe;
     private Process? _process;
@@ -33,6 +51,14 @@ public sealed class RvmEngineService : IRvmEngineService
 
     public bool IsRunning => _process is { HasExited: false } && _connected;
 
+    public RvmEngineService() => ReleaseStaleDriveMappings();
+
+    /// <summary>
+    /// 退出时再清一次：引擎正常 Stop 会自己 subst /D，但被强杀或超时收尾时会漏，
+    /// 这里兜底，保证窗口关掉之后盘符不留在系统里。
+    /// </summary>
+    public void CleanUpDriveMappings() => ClearStaleMappings();
+
     public bool IsAvailable { get; private set; }
 
     public string Status => _status;
@@ -44,10 +70,23 @@ public sealed class RvmEngineService : IRvmEngineService
 
     public async Task<bool> EnsureRunningAsync(CancellationToken cancellationToken = default)
     {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        try
+        {
+            if (_stopping) return false;
             return await EnsureRunningCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // 关闭流程取消在途/排队的启动请求：这是停止态的正常结果，不是错误
+            return false;
         }
         finally
         {
@@ -62,6 +101,7 @@ public sealed class RvmEngineService : IRvmEngineService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_stopping) return false;
             if (!await EnsureRunningCoreAsync(cancellationToken).ConfigureAwait(false)) return false;
 
             var body = new List<byte>();
@@ -84,8 +124,7 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"Failed to sync tool authorizations: {ex.Message}";
-            ResetConnection();
+            FailConnection("Failed to sync tool authorizations", ex);
             return false;
         }
         finally
@@ -107,6 +146,7 @@ public sealed class RvmEngineService : IRvmEngineService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_stopping) return null;
             if (!await EnsureRunningCoreAsync(cancellationToken).ConfigureAwait(false)) return null;
 
             var body = new List<byte>();
@@ -187,8 +227,7 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"Failed to create the RVM session: {ex.Message}";
-            ResetConnection();
+            FailConnection("Failed to create the RVM session", ex);
             return null;
         }
         finally
@@ -203,7 +242,7 @@ public sealed class RvmEngineService : IRvmEngineService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!_connected) return;
+            if (_stopping || !_connected) return;
             var body = new List<byte>();
             RvmProto.AddVarint(body, 1, sessionId);
             RvmProto.AddBool(body, 2, true); // keep_diff：diff 按工作区保留，会话只卸载叠加盘
@@ -227,6 +266,7 @@ public sealed class RvmEngineService : IRvmEngineService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_stopping) return null;
             if (!_connected)
             {
                 _status = "RVM engine is not connected; cannot read workspace changes";
@@ -249,8 +289,7 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"Failed to read workspace changes: {ex.Message}";
-            ResetConnection();
+            FailConnection("Failed to read workspace changes", ex);
             return null;
         }
         finally
@@ -268,6 +307,7 @@ public sealed class RvmEngineService : IRvmEngineService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_stopping) return null;
             if (!_connected)
             {
                 _status = "RVM engine is not connected; cannot sync the workspace";
@@ -298,8 +338,7 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"Failed to sync the workspace: {ex.Message}";
-            ResetConnection();
+            FailConnection("Failed to sync the workspace", ex);
             return null;
         }
         finally
@@ -315,6 +354,7 @@ public sealed class RvmEngineService : IRvmEngineService
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (_stopping) return null;
             if (!_connected)
             {
                 _status = "RVM engine is not connected; cannot roll back the workspace";
@@ -330,8 +370,7 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"Failed to roll back the workspace: {ex.Message}";
-            ResetConnection();
+            FailConnection("Failed to roll back the workspace", ex);
             return null;
         }
         finally
@@ -355,42 +394,63 @@ public sealed class RvmEngineService : IRvmEngineService
     private static RvmSyncConflict ParseConflict(RvmProtoReader conflict) =>
         new(conflict.String(1), conflict.String(2));
 
-    public async Task ShutdownAsync()
+    public Task ShutdownAsync()
     {
-        await _gate.WaitAsync().ConfigureAwait(false);
+        lock (_lifecycleLock)
+            return _shutdownTask ??= ShutdownCoreAsync();
+    }
+
+    private async Task ShutdownCoreAsync()
+    {
+        // 停止态：新请求一律被拒绝，在途请求的取消令牌立刻作废
+        _stopping = true;
+        _abortCts.Cancel();
+
+        // 关键状态判断：协议通道是否空闲。命名管道的挂起读取不响应取消令牌（实测：60s 的会话快照
+        // 会让读取一直等到引擎回包），所以“等在途请求自己收尾”不是可靠的状态迁移。
+        // 抢到锁 = 通道空闲，可以协商；抢不到 = 引擎正被一条请求占用，单连接下它听不到 shutdown。
+        var process = _process;
+        var channelBusy = !_gate.Wait(0);
+        if (channelBusy)
+        {
+            // 通道被占用时没有第二条通道可协商：结束进程树，并丢弃通道来打断挂起的读取
+            _status = "RVM engine is busy with an in-flight request; stopping the process tree";
+            KillProcess(process);
+            ResetConnection();
+            // 通道已丢弃，在途操作会立刻失败并释放 _gate；这里等的是它退出的状态
+            await _gate.WaitAsync().ConfigureAwait(false);
+        }
+
         try
         {
-            if (_connected)
+            if (channelBusy)
             {
-                try
+                if (await WaitForExitAsync(process, EngineTeardownBudget).ConfigureAwait(false))
+                    _status = "RVM engine stopped (in-flight request abandoned)";
+            }
+            else if (process is null)
+            {
+                // 从未启动过：没有进程也没有通道，停止态直接成立
+                _status = "RVM engine stopped";
+            }
+            else
+            {
+                // 通道空闲：请求优雅退出。引擎接受后自己收尾；不接受说明无法协作退出，这是确定状态
+                var accepted = await TrySendShutdownAsync().ConfigureAwait(false);
+                if (!accepted) KillProcess(process);
+                if (await WaitForExitAsync(process, accepted ? EngineTeardownBudget : TimeSpan.Zero)
+                        .ConfigureAwait(false))
                 {
-                    var body = new List<byte>();
-                    RvmProto.AddString(body, 1, "host shutdown");
-                    await RequestAsync(body, 12, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (IsExpected(ex))
-                {
+                    _status = accepted
+                        ? "RVM engine stopped"
+                        : "RVM engine stopped (shutdown request refused)";
                 }
             }
-            ResetConnection();
-            if (_process is { HasExited: false })
-            {
-                try
-                {
-                    _process.WaitForExit(5000);
-                }
-                catch (InvalidOperationException)
-                {
-                }
-            }
-            if (_process is { HasExited: false })
-            {
-                _process.Kill(entireProcessTree: true);
-            }
-            _process?.Dispose();
+
+            process?.Dispose();
             _process = null;
+            ResetConnection();
             IsAvailable = false;
-            _status = "RVM engine stopped";
         }
         finally
         {
@@ -398,24 +458,91 @@ public sealed class RvmEngineService : IRvmEngineService
         }
     }
 
-    public void Dispose() => ShutdownAsync().GetAwaiter().GetResult();
+    private async Task<bool> TrySendShutdownAsync()
+    {
+        if (!_connected || _pipe is null) return false;
+        var body = new List<byte>();
+        RvmProto.AddString(body, 1, "host shutdown");
+        try
+        {
+            // 读回引擎的 shutdown 接受状态；此请求在停止态下仍必须发出
+            var response = await RequestAsync(body, 12, CancellationToken.None, ignoreAbort: true)
+                .ConfigureAwait(false);
+            return response is not null;
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            _status = $"Failed to request RVM engine shutdown: {ex.Message}";
+            return false;
+        }
+    }
+
+    private static void KillProcess(Process? process)
+    {
+        try
+        {
+            if (process is { HasExited: false })
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+        }
+    }
+
+    // 等到“进程退出”这个终态。budget 只覆盖宿主观测不到的卡死（引擎停在收尾里），
+    // 用完就结束进程树；连强杀之后都不退，就交回进程生命周期，绝不把宿主挂在退出路径上。
+    private async Task<bool> WaitForExitAsync(Process? process, TimeSpan budget)
+    {
+        if (process is null) return true;
+        try
+        {
+            if (process.HasExited) return true;
+            var exited = process.WaitForExitAsync();
+            if (budget <= TimeSpan.Zero)
+            {
+                await exited.ConfigureAwait(false);
+                return true;
+            }
+            if (ReferenceEquals(await Task.WhenAny(exited, Task.Delay(budget)).ConfigureAwait(false), exited))
+                return true;
+            KillProcess(process);
+            if (ReferenceEquals(await Task.WhenAny(exited, Task.Delay(budget)).ConfigureAwait(false), exited))
+                return true;
+            _status = "RVM engine did not exit after being terminated";
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
+    public void Dispose()
+    {
+        // App.OnExit 在 UI 线程上同步调用：这里只等停止态的终局，不能把异常抛到退出路径上
+        try
+        {
+            ShutdownAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            _status = $"RVM engine shutdown failed: {ex.Message}";
+        }
+    }
 
     private async Task<bool> EnsureRunningCoreAsync(CancellationToken cancellationToken)
     {
+        if (_stopping) return false;
+        using var abort = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abortCts.Token);
+        cancellationToken = abort.Token;
         if (IsRunning) return IsAvailable;
 
         ResetConnection();
         if (_process is { HasExited: false })
         {
-            // 上一次管道中断但引擎仍活着：先收尸，避免重复启动进程
-            try
-            {
-                _process.Kill(entireProcessTree: true);
-                _process.WaitForExit(2000);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
-            {
-            }
+            // 上一次管道中断但引擎仍活着：先结束进程，再等它的退出事件，不按秒数猜
+            KillProcess(_process);
+            await WaitForExitAsync(_process, EngineTeardownBudget).ConfigureAwait(false);
         }
         _process?.Dispose();
         _process = null;
@@ -432,6 +559,9 @@ public sealed class RvmEngineService : IRvmEngineService
         _enginePath = enginePath;
         _pipeName = pipeName;
         _token = token;
+        // 引擎被强杀/崩溃时 subst 映射会留在系统里（subst 不会随进程消失），
+        // 启动时先把指向 RVM 存储的遗留盘符清掉。
+        ReleaseStaleDriveMappings();
         var start = new ProcessStartInfo(enginePath)
         {
             UseShellExecute = false,
@@ -553,7 +683,11 @@ public sealed class RvmEngineService : IRvmEngineService
 
     // 发送一个 RpcRequest（bodyField 为 oneof 中的消息字段号），返回 RpcResponse 解析结果；
     // 引擎错误码统一落到 Status，调用方拿 null 表示失败。
-    private async Task<RvmProtoReader?> RequestAsync(List<byte> body, int bodyField, CancellationToken cancellationToken)
+    private async Task<RvmProtoReader?> RequestAsync(
+        List<byte> body,
+        int bodyField,
+        CancellationToken cancellationToken,
+        bool ignoreAbort = false)
     {
         if (_pipe is null) throw new InvalidOperationException("The pipe is not connected.");
         var requestId = _nextRequestId++;
@@ -562,13 +696,12 @@ public sealed class RvmEngineService : IRvmEngineService
         RvmProto.AddVarint(request, 2, requestId);
         RvmProto.AddMessage(request, bodyField, nested => nested.AddRange(body));
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using var timeout = ignoreAbort
+            ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _abortCts.Token);
         timeout.CancelAfter(RequestTimeoutMs);
         await WriteFrameAsync(request, requestId, timeout.Token).ConfigureAwait(false);
-        var payload = await ReadFrameAsync(timeout.Token).ConfigureAwait(false);
-        var response = RvmProtoReader.Parse(payload);
-        if (response.Varint(2) != requestId)
-            throw new RvmProtocolException("Response request id does not match.");
+        var response = await ReadResponseAsync(requestId, timeout.Token).ConfigureAwait(false);
         if (response.Message(3) is { } error)
         {
             var code = error.Varint(1);
@@ -578,6 +711,19 @@ public sealed class RvmEngineService : IRvmEngineService
             return null;
         }
         return response;
+    }
+
+    // 被取消的在途请求仍可能收到引擎的迟到回包：跳过不属于本次请求的帧，
+    // 否则关闭流程里那条 shutdown 请求会拿错回包，把“引擎已接受”误判成协议错误。
+    private async Task<RvmProtoReader> ReadResponseAsync(ulong requestId, CancellationToken cancellationToken)
+    {
+        for (var skipped = 0; skipped < MaxStaleResponses; skipped++)
+        {
+            var payload = await ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            var response = RvmProtoReader.Parse(payload);
+            if (response.Varint(2) == requestId) return response;
+        }
+        throw new RvmProtocolException("Response request id does not match.");
     }
 
     private async Task WriteFrameAsync(List<byte> payload, ulong requestId, CancellationToken cancellationToken)
@@ -615,6 +761,14 @@ public sealed class RvmEngineService : IRvmEngineService
         return payload;
     }
 
+    // 失败收尾：停止态下不要动协议通道——关闭流程正要用它请求引擎优雅退出
+    private void FailConnection(string context, Exception ex)
+    {
+        _status = $"{context}: {ex.Message}";
+        if (_stopping) return;
+        ResetConnection();
+    }
+
     private void ResetConnection()
     {
         _connected = false;
@@ -641,9 +795,30 @@ public sealed class RvmEngineService : IRvmEngineService
                     if (_engineOutput.Length > 4096)
                         _engineOutput.Remove(0, _engineOutput.Length - 4096);
                 }
+                AppendEngineLog(channel, line);
             }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+        }
+    }
+
+    // 引擎把每一步的耗时打在 stderr 上（seed / probe / isolation），落一份文件方便事后查。
+    private static void AppendEngineLog(string channel, string line)
+    {
+        if (channel != "err") return;
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Responsible", "logs");
+            var path = Path.Combine(directory, "rvm-engine.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 2 * 1024 * 1024) File.Delete(path);
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(path,
+                $"{DateTimeOffset.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
         }
     }
@@ -685,4 +860,84 @@ public sealed class RvmEngineService : IRvmEngineService
     private static bool IsExpected(Exception ex) =>
         ex is IOException or TimeoutException or InvalidOperationException or RvmProtocolException
             or OperationCanceledException or ObjectDisposedException or UnauthorizedAccessException;
+
+    // subst 建立的盘符属于系统 DOS devices，进程退出不会自动消失：引擎被强杀、
+    // 或宿主崩溃时，R: 会一直指向会话盘。这里在每次启动引擎前清掉指向 RVM 存储的映射，
+    // 只动我们自己创建的盘符，不碰用户自己的 subst。
+    private static readonly object StaleMappingLock = new();
+    private static bool _staleMappingsCleared;
+
+    private static void ReleaseStaleDriveMappings()
+    {
+        lock (StaleMappingLock)
+        {
+            if (_staleMappingsCleared) return;
+            _staleMappingsCleared = true;
+        }
+        ClearStaleMappings();
+    }
+
+    private static void ClearStaleMappings()
+    {
+        string root;
+        try
+        {
+            root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Responsible", "RVM");
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        foreach (var drive in EnumerateSubstDrives())
+        {
+            var target = QueryDriveTarget(drive);
+            if (target is null) continue;
+            // QueryDosDevice 返回的是 NT 路径（\??\C:\...），比较前先剥掉前缀
+            if (target.StartsWith(@"\??\", StringComparison.Ordinal)) target = target[4..];
+            if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue;
+            RunSubst($"{drive} /D");
+        }
+    }
+
+    private static IEnumerable<string> EnumerateSubstDrives()
+    {
+        for (var letter = 'A'; letter <= 'Z'; letter++)
+            yield return $"{letter}:";
+    }
+
+    private static string? QueryDriveTarget(string drive)
+    {
+        var buffer = new StringBuilder(1024);
+        var length = QueryDosDevice(drive, buffer, buffer.Capacity);
+        if (length == 0) return null;
+        // 返回值是写入的字符数；字符串里可能带 MULTI_SZ 的终止符，按第一个 NUL 截断
+        var text = buffer.ToString();
+        var end = text.IndexOf('\0');
+        return end >= 0 ? text[..end] : text;
+    }
+
+    private static void RunSubst(string arguments)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("subst")
+            {
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            process?.WaitForExit(5000);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern uint QueryDosDevice(string deviceName, StringBuilder targetPath, int max);
 }

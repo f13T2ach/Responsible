@@ -18,7 +18,16 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Responsible", "dsh-home");
 
-    private const int BridgePort = 1107;
+    // 端口每个进程现取现用：固定在 1107 时，上一个内核没退干净（或另一个实例还在跑）
+    // 会让新内核绑定失败，宿主随后打到旧实例上，只读接口直接 401 unauthorized。
+    private static int ReserveBridgePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
+    }
 
     private static readonly string PatchPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -43,6 +52,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     private string _status = "Not started";
     private CancellationTokenSource? _streamCts;
     private DshRvmBinding? _rvmBinding;
+    private string? _rvmUnavailable;
 
     public bool IsAvailable { get; private set; }
 
@@ -67,18 +77,21 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         Bridge = new DshBridgeInfo(
             $@"\\.\pipe\responsible-dsh-{Environment.ProcessId}-{Guid.NewGuid():N}",
             Guid.NewGuid().ToString("N"),
-            BridgePort);
+            ReserveBridgePort());
     }
 
     public DshBridgeInfo Bridge { get; }
 
     public async Task<bool> StartAsync(string provider, string model, string cwd, string? apiKey,
-        DshRvmBinding? rvm = null)
+        DshRvmBinding? rvm = null, string? rvmUnavailable = null)
     {
         await _startGate.WaitAsync().ConfigureAwait(false);
         try
         {
             _rvmBinding = rvm;
+            // 工作区要求了 RVM 但会话没建起来：内核仍然启动，但沙箱服务换成
+            // “永远拒绝”的 RVM 提供者，理由直接给到模型，不再回退到 DSH 的 ACL 沙箱。
+            _rvmUnavailable = rvm is null ? rvmUnavailable : null;
             return await StartCoreAsync(provider, model, cwd, apiKey).ConfigureAwait(false);
         }
         finally
@@ -97,7 +110,12 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             return false;
         }
 
-        WritePatch();
+        var patchError = WritePatch();
+        if (patchError is not null)
+        {
+            Status = patchError;
+            return false;
+        }
         var info = new ProcessStartInfo
         {
             FileName = "node",
@@ -113,7 +131,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             CreateNoWindow = true,
         };
         info.Environment["DSH_HOME"] = HomePath;
-        info.Environment["DSH_BRIDGE_PORT"] = BridgePort.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        info.Environment["DSH_BRIDGE_PORT"] = Bridge.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         // 插件在绑定内核时读取令牌并随 --token 传给壳桥接；沙箱子进程不会继承进程环境
         if (_rvmBinding is { } rvm)
             info.Environment["RESPONSIBLE_RVM_TOKEN"] = rvm.Token;
@@ -786,12 +804,25 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         return null;
     }
 
-    private void WritePatch()
+    // 返回非 null 表示 patch 无法生成：RVM 会话已经建立、却装不上接管插件时宁可失败，
+    // 也不能让内核悄悄退回 DSH 自带的 ACL 沙箱（那会在工作区授权上直接炸掉）。
+    //
+    // 注意“会话没建立”（_rvmUnavailable）是另一回事：那不是配置错误，而是这个工作区
+    // 暂时建不出会话盘（例如没有 Git 索引）。此时保留 DSH 自带的 sandbox，让工具照常可用，
+    // 只把原因挂在 badge 上——否则整条命令通道会变成“什么都不能跑”。
+    private string? WritePatch()
     {
         var plugin = ResolvePlugin();
         var statsPlugin = ResolveStatsPlugin();
-        var rvmPlugin = _rvmBinding is null ? null : ResolveRvmPlugin();
-        var sandboxModule = _rvmBinding is null ? null : ResolveSandboxModule();
+        var rvmActive = _rvmBinding is not null;
+        var rvmPlugin = rvmActive ? ResolveRvmPlugin() : null;
+        var sandboxModule = rvmActive ? ResolveSandboxModule() : null;
+        if (rvmActive && (rvmPlugin is null || sandboxModule is null))
+        {
+            return "RVM takeover is unavailable: "
+                   + (rvmPlugin is null ? "RDshPlugins/rvm-sandbox.mjs" : "the DSH sandbox module")
+                   + " was not found; the kernel was not started with a different sandbox.";
+        }
         var insert = new List<string>();
         if (statsPlugin is not null)
         {
@@ -805,14 +836,15 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             insert.Add("      config:");
             insert.Add($"        bridgePipe: {YamlString(Bridge.PipeName)}");
             insert.Add($"        bridgeToken: {YamlString(Bridge.Token)}");
-            insert.Add($"        bridgePort: {BridgePort}");
+            insert.Add($"        bridgePort: {Bridge.Port}");
         }
-        if (_rvmBinding is { } rvm && rvmPlugin is not null && sandboxModule is not null)
+        if (rvmActive && rvmPlugin is not null && sandboxModule is not null)
         {
             insert.Add("    - id: rvm-sandbox");
             insert.Add($"      name: {YamlString(rvmPlugin)}");
             insert.Add("      config:");
             insert.Add($"        sandboxModule: {YamlString(sandboxModule)}");
+            var rvm = _rvmBinding!;
             insert.Add($"        enginePath: {YamlString(rvm.EnginePath)}");
             insert.Add($"        pipeName: {YamlString(rvm.PipeName)}");
             insert.Add($"        sessionId: {YamlString(rvm.SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
@@ -826,8 +858,8 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             lines.Add("- insert:");
             lines.AddRange(insert);
         }
-        // RVM 会话就绪时整条替换 DSH 自带的 same-world sandbox 服务；未就绪时保留原实现（如实提示不可用）
-        if (_rvmBinding is { } bound && rvmPlugin is not null && sandboxModule is not null)
+        // 只有真正接管时才能替换 DSH 自带的 sandbox；未就绪时保留它，工具才有后端可用。
+        if (rvmActive && rvmPlugin is not null && sandboxModule is not null)
         {
             lines.Add("- id: sandbox");
             lines.Add("  disabled: true");
@@ -845,6 +877,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
 
         Directory.CreateDirectory(Path.GetDirectoryName(PatchPath)!);
         File.WriteAllLines(PatchPath, lines);
+        return null;
     }
 
     // JSON 字符串是合法的 YAML 双引号标量，能安全承载路径与任意条目 id

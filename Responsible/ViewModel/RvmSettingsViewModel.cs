@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -58,9 +58,73 @@ public partial class RvmSettingsViewModel : ObservableObject
     };
 
     private readonly IAclAuthorizationService _acl;
+    private readonly string? _workspaceDirectory;
     private bool _loading;
 
-    public RvmSettingsViewModel(IAclAuthorizationService acl) => _acl = acl;
+    public RvmSettingsViewModel(IAclAuthorizationService acl, string? workspaceDirectory = null)
+    {
+        _acl = acl;
+        _workspaceDirectory = workspaceDirectory;
+    }
+
+    // ---- Git 索引 ----
+    // 会话盘只包含 Git 索引里的文件；办公工作区往往不是仓库，所以这里给一条
+    // “自动索引”（git init + 全量 add）的出口，而不是让用户去学 Git。
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowIndexWarning))]
+    private bool _indexReady;
+
+    [ObservableProperty]
+    private string _indexMessage = string.Empty;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowIndexWarning))]
+    private bool _indexAvailable;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanAutoIndex))]
+    private bool _indexBusy;
+
+    public bool ShowIndexWarning => IndexAvailable && !IndexReady;
+
+    public bool CanAutoIndex => !IndexBusy;
+
+    public async Task RefreshIndexAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_workspaceDirectory))
+        {
+            IndexAvailable = false;
+            return;
+        }
+        var status = await RvmWorkspaceIndex.InspectAsync(_workspaceDirectory).ConfigureAwait(true);
+        ApplyIndexStatus(status);
+    }
+
+    private void ApplyIndexStatus(RvmIndexStatus status)
+    {
+        IndexAvailable = status.State != RvmIndexState.GitUnavailable;
+        IndexReady = status.IsReady;
+        IndexMessage = status.Message;
+    }
+
+    [RelayCommand]
+    private async Task AutoIndexAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_workspaceDirectory) || IndexBusy) return;
+        IndexBusy = true;
+        try
+        {
+            // comprehensive：办公工作区里没有 .gitignore 概念，整个文件夹都进快照
+            var status = await RvmWorkspaceIndex
+                .InitializeAsync(_workspaceDirectory, comprehensive: true)
+                .ConfigureAwait(true);
+            ApplyIndexStatus(status);
+        }
+        finally
+        {
+            IndexBusy = false;
+        }
+    }
 
     [ObservableProperty]
     private string _filter = string.Empty;

@@ -1,4 +1,4 @@
-#include "sandbox/backend.h"
+﻿#include "sandbox/backend.h"
 
 #include <windows.h>
 
@@ -6,6 +6,7 @@
 #include <sddl.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
@@ -13,6 +14,8 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -203,8 +206,44 @@ void AppendSessionJournal(const std::wstring& storage_root, const std::string& e
 // sessions copy only host changes and leave files the sandbox edited alone,
 // so the archive keeps behaving like a VM disk.
 constexpr std::size_t kSeedMaxFiles = 40000;
-constexpr std::uint64_t kSeedMaxBytes = 512ull * 1024 * 1024;
-constexpr ULONGLONG kSeedMaxMillis = 60000;
+// 宿主隔离验证要启动 cmd 去枚举用户目录，偶发被云端占位目录拖到十几秒。
+// 探测结果按 AppContainer profile 名进程级缓存：profile 名带引擎 PID，
+// 同一引擎进程内重复开会话不需要再验一次（每次会话都是新的 Environment 实例）。
+std::mutex g_isolated_mutex;
+std::set<std::wstring> g_isolated_profiles;
+// 会话盘可用性探测同理：同一盘符映射到同一目录，验过一次就够了。
+std::set<std::wstring> g_probed_mounts;
+
+bool IsolationAlreadyProven(const std::wstring& profile) {
+  if (profile.empty()) return false;
+  std::lock_guard<std::mutex> lock(g_isolated_mutex);
+  return g_isolated_profiles.count(profile) != 0;
+}
+
+void MarkIsolationProven(const std::wstring& profile) {
+  if (profile.empty()) return;
+  std::lock_guard<std::mutex> lock(g_isolated_mutex);
+  g_isolated_profiles.insert(profile);
+}constexpr std::uint64_t kSeedMaxBytes = 512ull * 1024 * 1024;
+// 首次播种要复制 git 索引里的全部文件；带子模块的工作区（例如 11k+ 文件）在
+// 60s 内复制不完，会把每次会话都卡死在同一条超时上。预算是硬上限，但按环境
+// 变量放宽，并且超时后保留已复制内容与进度清单，下一次会话从断点继续。
+constexpr ULONGLONG kSeedDefaultMaxMillis = 300000;
+constexpr std::size_t kSeedManifestFlushEvery = 256;
+
+ULONGLONG SeedBudgetMillis() {
+  static const ULONGLONG budget = [] {
+    wchar_t text[32] = {};
+    const DWORD length = GetEnvironmentVariableW(L"RVM_SEED_BUDGET_MS", text, 32);
+    if (length == 0 || length >= 32) return kSeedDefaultMaxMillis;
+    unsigned long long parsed = 0;
+    for (const wchar_t* cursor = text; *cursor >= L'0' && *cursor <= L'9'; ++cursor)
+      parsed = parsed * 10 + static_cast<unsigned long long>(*cursor - L'0');
+    // 0 表示不设时间上限（仍受文件数与字节数上限约束）
+    return static_cast<ULONGLONG>(parsed);
+  }();
+  return budget;
+}
 
 std::wstring WideFromUtf8(const std::string& text) {
   if (text.empty()) return {};
@@ -640,6 +679,9 @@ struct SeedStats {
 core::Status SeedOrSyncWorkspace(const std::wstring& base, const std::wstring& clone,
                                  const std::wstring& storage_root, bool first_seed,
                                  SeedStats* stats) {
+  // 首次与续传走同一条增量路径：会话盘是否 ready 由 clone.ready 判断，
+  // 进度由 seed.manifest 表达，first_seed 不再改变复制决策。
+  (void)first_seed;
   std::error_code error;
   fs::create_directories(clone, error);
   if (error) {
@@ -651,7 +693,9 @@ core::Status SeedOrSyncWorkspace(const std::wstring& base, const std::wstring& c
   const fs::path base_path(base);
   const fs::path clone_path(clone);
   const fs::path manifest_path = fs::path(storage_root) / L"seed.manifest";
-  const SeedManifest previous = first_seed ? SeedManifest{} : ReadSeedManifest(manifest_path);
+  // 上一轮可能超时或被中断：清单总是先读，first_seed 只表示会话盘还没标记 ready，
+  // 已复制过的文件靠清单跳过，避免每次重试都从零开始。
+  const SeedManifest previous = ReadSeedManifest(manifest_path);
   const WorkspaceListing listing = ListWorkspaceFiles(base);
   stats->from_git = listing.from_git;
   if (!listing.from_git) {
@@ -679,11 +723,43 @@ core::Status SeedOrSyncWorkspace(const std::wstring& base, const std::wstring& c
   std::size_t planned_files = 0;
   std::uint64_t planned_bytes = 0;
 
-  for (const std::wstring& rel : listing.files) {
-    if (!SafeRelativePath(rel)) continue;
+  // 先把宿主侧 stat 并行做掉：两万多次 GetFileAttributesEx 串行要几秒，
+  // 而这一步发生在每次切会话/发消息之前的准备路径上。
+  struct HostStat {
+    bool valid = false;
+    bool ok = false;
     std::uint64_t size = 0;
     std::int64_t mtime = 0;
-    if (!StatRegularFile(base_path / fs::path(rel), &size, &mtime)) {
+  };
+  std::vector<HostStat> host_stats(listing.files.size());
+  {
+    std::atomic<std::size_t> stat_cursor{0};
+    const auto statter = [&] {
+      for (;;) {
+        const std::size_t index = stat_cursor.fetch_add(1, std::memory_order_relaxed);
+        if (index >= listing.files.size()) return;
+        const std::wstring& rel = listing.files[index];
+        if (!SafeRelativePath(rel)) continue;
+        HostStat stat;
+        stat.valid = true;
+        stat.ok = StatRegularFile(base_path / fs::path(rel), &stat.size, &stat.mtime);
+        host_stats[index] = stat;
+      }
+    };
+    const unsigned statters = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> pool;
+    pool.reserve(statters);
+    for (unsigned index = 0; index < statters; ++index) pool.emplace_back(statter);
+    for (std::thread& thread : pool) thread.join();
+  }
+
+  for (std::size_t index = 0; index < listing.files.size(); ++index) {
+    const std::wstring& rel = listing.files[index];
+    const HostStat& host = host_stats[index];
+    if (!host.valid) continue;
+    const std::uint64_t size = host.size;
+    const std::int64_t mtime = host.mtime;
+    if (!host.ok) {
       ++stats->unreadable;
       continue;
     }
@@ -692,18 +768,22 @@ core::Status SeedOrSyncWorkspace(const std::wstring& base, const std::wstring& c
     entry.host_size = size;
     entry.host_time = mtime;
     const auto known = previous.find(rel);
-    if (first_seed || known == previous.end()) {
+    if (known == previous.end()) {
       entry.copy = true;
     } else if (known->second.host_size == size && known->second.host_time == mtime) {
       entry.copy = false;
     } else {
       std::uint64_t clone_size = 0;
       std::int64_t clone_time = 0;
-      const bool untouched =
-          StatRegularFile(clone_path / fs::path(rel), &clone_size, &clone_time) &&
-          clone_size == known->second.clone_size && clone_time == known->second.clone_time;
-      entry.copy = untouched;
-      if (!untouched) {
+      const bool clone_present =
+          StatRegularFile(clone_path / fs::path(rel), &clone_size, &clone_time);
+      const bool untouched = clone_present &&
+                             clone_size == known->second.clone_size &&
+                             clone_time == known->second.clone_time;
+      // 清单里有、会话盘里却没有：上一轮播种被中断，或用户清掉了会话盘。
+      // 这不是冲突，必须补复制，否则会话盘会静默缺文件。
+      entry.copy = !clone_present || untouched;
+      if (clone_present && !untouched) {
         ++stats->conflicts;
         entry.preserve_host_state = true;
       }
@@ -726,43 +806,90 @@ core::Status SeedOrSyncWorkspace(const std::wstring& base, const std::wstring& c
 
   SeedManifest next = previous;
   const ULONGLONG started = GetTickCount64();
+  const ULONGLONG budget = SeedBudgetMillis();
+
+  // 只保留需要复制的条目；其余在串行段更新清单。
+  std::vector<const PlannedEntry*> to_copy;
+  to_copy.reserve(planned_files);
   for (const PlannedEntry& entry : plan) {
-    const fs::path source = base_path / fs::path(entry.rel);
-    const fs::path target = clone_path / fs::path(entry.rel);
     if (entry.copy) {
-      if (GetTickCount64() - started > kSeedMaxMillis) {
-        return core::Status::Failure(core::Error(
-            core::ErrorCode::kBackendFailed,
-            "the session disk seed took longer than the time budget", false,
-            "files=" + std::to_string(stats->copied)));
+      to_copy.push_back(&entry);
+      continue;
+    }
+    ++stats->skipped;
+    // Keep the host state current when the sandbox version was preserved
+    // without a conflict; a conflict keeps the previous host state so the
+    // diff can still refuse to overwrite work the user did on the host.
+    if (!entry.preserve_host_state) {
+      const auto known = next.find(entry.rel);
+      if (known != next.end()) {
+        known->second.host_size = entry.host_size;
+        known->second.host_time = entry.host_time;
       }
-      fs::create_directories(target.parent_path(), error);
+    }
+  }
+
+  // 目录先串行建好：并发 create_directories 会在同一父目录上互相竞争。
+  {
+    std::set<std::wstring> directories;
+    for (const PlannedEntry* entry : to_copy) {
+      const fs::path parent = fs::path(entry->rel).parent_path();
+      if (!parent.empty()) directories.insert(parent.wstring());
+    }
+    for (const std::wstring& directory : directories) {
+      fs::create_directories(clone_path / fs::path(directory), error);
       error.clear();
-      fs::copy_file(source, target, fs::copy_options::overwrite_existing, error);
-      if (error) {
+    }
+  }
+
+  // 逐文件复制走内核 CopyFileW 并并行执行：跨卷播种的瓶颈是小文件的打开/关闭开销，
+  // 单线程 std::filesystem::copy_file 在 1.5 万个文件上要几十秒。
+  std::atomic<std::size_t> cursor{0};
+  std::atomic<bool> timed_out{false};
+  std::mutex state_lock;
+  const auto worker = [&] {
+    for (;;) {
+      const std::size_t index = cursor.fetch_add(1, std::memory_order_relaxed);
+      if (index >= to_copy.size()) return;
+      if (budget != 0 && GetTickCount64() - started > budget) {
+        timed_out.store(true, std::memory_order_relaxed);
+        return;
+      }
+      const PlannedEntry* entry = to_copy[index];
+      const fs::path source = base_path / fs::path(entry->rel);
+      const fs::path target = clone_path / fs::path(entry->rel);
+      if (CopyFileW(source.c_str(), target.c_str(), FALSE) == FALSE) {
+        std::lock_guard<std::mutex> lock(state_lock);
         ++stats->unreadable;
-        error.clear();
         continue;
       }
       SeedRecord record;
-      record.host_size = entry.host_size;
-      record.host_time = entry.host_time;
+      record.host_size = entry->host_size;
+      record.host_time = entry->host_time;
       StatRegularFile(target, &record.clone_size, &record.clone_time);
-      next[entry.rel] = record;
+      std::lock_guard<std::mutex> lock(state_lock);
+      next[entry->rel] = record;
       ++stats->copied;
-    } else {
-      ++stats->skipped;
-      // Keep the host state current when the sandbox version was preserved
-      // without a conflict; a conflict keeps the previous host state so the
-      // diff can still refuse to overwrite work the user did on the host.
-      if (!entry.preserve_host_state) {
-        const auto known = next.find(entry.rel);
-        if (known != next.end()) {
-          known->second.host_size = entry.host_size;
-          known->second.host_time = entry.host_time;
-        }
-      }
+      if (stats->copied % kSeedManifestFlushEvery == 0) WriteSeedManifest(manifest_path, next);
     }
+  };
+  const unsigned concurrency = std::max(1u, std::min(8u, std::thread::hardware_concurrency()));
+  {
+    std::vector<std::thread> pool;
+    pool.reserve(concurrency);
+    for (unsigned index = 0; index < concurrency; ++index) pool.emplace_back(worker);
+    for (std::thread& thread : pool) thread.join();
+  }
+
+  if (timed_out.load()) {
+    // 已复制的文件留在会话盘上，进度清单也落盘：下一次会话从这里继续，
+    // 而不是删掉重来（这正是大工作区每次都被同一条超时挡住的原因）。
+    WriteSeedManifest(manifest_path, next);
+    return core::Status::Failure(core::Error(
+        core::ErrorCode::kBackendFailed,
+        "the session disk seed took longer than the time budget", false,
+        "copied=" + std::to_string(stats->copied) + " planned=" +
+            std::to_string(to_copy.size()) + " budget_ms=" + std::to_string(budget)));
   }
 
   for (const auto& [rel, record] : previous) {
@@ -789,12 +916,27 @@ core::Status SeedOrSyncWorkspace(const std::wstring& base, const std::wstring& c
 
   // The change tracker snapshots turns with git, so the archive needs a repo
   // of its own; initializing one is cheap and avoids copying the host .git.
-  if (listing.from_git && GetFileAttributesW((clone_path / L".git").c_str()) ==
-                              INVALID_FILE_ATTRIBUTES) {
+  if (listing.from_git) {
     const std::wstring git = FindGitExecutable();
     if (!git.empty()) {
-      RunToFile(git, L"-C \"" + GitPathArgument(clone) + L"\" init -q", clone, L"NUL",
-                20000);
+      const fs::path git_dir = clone_path / L".git";
+      const std::wstring git_base = L"-C \"" + GitPathArgument(clone) + L"\"";
+      if (GetFileAttributesW(git_dir.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        RunToFile(git, git_base + L" init -q", clone, L"NUL", 20000);
+        // 会话临时目录不进版本库，也不会出现在宿主的变更卡片里
+        std::error_code info_error;
+        fs::create_directories(git_dir / L"info", info_error);
+        std::ofstream exclude(git_dir / L"info" / L"exclude", std::ios::app);
+        if (exclude) exclude << ".rvm_temp/\n";
+      }
+      // 宿主每轮都会快照一次工作区；这份 index 是它的增量基线。没有它，
+      // 每次发消息前都要把整盘文件重新 hash（实测 65 秒），首字延迟就是这么来的。
+      if (GetFileAttributesW((git_dir / L"index").c_str()) == INVALID_FILE_ATTRIBUTES) {
+        const ULONGLONG index_started = GetTickCount64();
+        RunToFile(git, git_base + L" add --all --ignore-errors", clone, L"NUL", 300000);
+        core::LogInfo("sandbox", "session disk index built in " +
+                                     std::to_string(GetTickCount64() - index_started) + "ms");
+      }
     }
   }
 
@@ -1099,13 +1241,26 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     core::LogDebug("sandbox", "session temp ready");
 
     if (spec_.overlay_workspace) {
-      const core::Status reachable = VerifySessionDiskAccess(write);
+      const ULONGLONG probe_started = GetTickCount64();
+      const std::wstring probe_key = session_workspace_ + L"|" + clone_root_;
+      bool already_probed = false;
+      {
+        std::lock_guard<std::mutex> lock(g_isolated_mutex);
+        already_probed = g_probed_mounts.count(probe_key) != 0;
+      }
+      const core::Status reachable = already_probed ? core::Status::Ok() : VerifySessionDiskAccess(write);
       if (!reachable.ok()) {
         Stop();
         phase_ = runtime::EnvironmentPhase::kFailed;
         return reachable.error();
       }
-      core::LogDebug("sandbox", "mounted workspace access verified");
+      if (!already_probed) {
+        std::lock_guard<std::mutex> lock(g_isolated_mutex);
+        g_probed_mounts.insert(probe_key);
+      }
+      core::LogInfo("sandbox", "session disk probe verified in " +
+                                   std::to_string(GetTickCount64() - probe_started) + "ms" +
+                                   (already_probed ? " (cached)" : ""));
     } else {
       core::Status granted = GrantDirectory(profile_.sid, spec_.workspace_root, write, true);
       if (!granted.ok()) {
@@ -1197,13 +1352,18 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     if (!granted_devices_.empty()) core::LogDebug("sandbox", "exposed devices granted");
 
     // Fail closed unless the containment really denies the host profile.
-    const core::Status isolated = VerifyHostIsolation();
+    const ULONGLONG isolate_started = GetTickCount64();
+    const bool isolation_cached = IsolationAlreadyProven(profile_.name);
+    const core::Status isolated = isolation_cached ? core::Status::Ok() : VerifyHostIsolation();
     if (!isolated.ok()) {
       Stop();
       phase_ = runtime::EnvironmentPhase::kFailed;
       return isolated.error();
     }
-    core::LogDebug("sandbox", "host profile isolation verified");
+    MarkIsolationProven(profile_.name);
+    core::LogInfo("sandbox", "host isolation verified in " +
+                                 std::to_string(GetTickCount64() - isolate_started) + "ms" +
+                                 (isolation_cached ? " (cached)" : ""));
 
     phase_ = runtime::EnvironmentPhase::kReady;
     runtime::EnvironmentFacts facts;
@@ -1262,7 +1422,7 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     // Retire the drive first: the sandbox must not keep a usable letter while
     // grants are revoked.
     const std::wstring released_drive = clone_drive_;
-    const std::wstring released_root = clone_root_;
+    const std::wstring released_root = mount_root_.empty() ? clone_root_ : mount_root_;
     UnmapSessionDrive(released_drive, released_root);
     for (auto it = granted_directories_.rbegin(); it != granted_directories_.rend(); ++it) {
       const core::Status revoked = RevokeDirectory(profile_.sid, *it, true);
@@ -1660,16 +1820,59 @@ class SandboxEnvironment final : public runtime::IEnvironment {
     }
 
     storage_root_ = WorkspaceStorageRoot(spec_);
+    // 会话盘搬到 volumes 之后，这个目录不再被 create_directories(clone) 顺带创建；
+    // seed.manifest / baseline.manifest 都写在它下面，缺了就会在收尾处报
+    // “failed to record the workspace baseline (No such file or directory)”。
+    {
+      std::error_code storage_error;
+      fs::create_directories(storage_root_, storage_error);
+      if (storage_error) {
+        return core::Status::Failure(core::Error(
+            core::ErrorCode::kBackendFailed, "failed to create the workspace storage directory", false,
+            storage_error.message()));
+      }
+    }
     clone_persistent_ = !spec_.storage_key.empty();
-    clone_root_ = (fs::path(storage_root_) / L"workspace").wstring();
+    // volumes 布局只给宿主工作区用（宿主一定带 overlay_drive）。CLI 的诊断会话同样有
+    // storage_key，但它们不该出现在共享盘符下，否则 R:\ 里会混进 archivetest/conflicttest 之类的目录。
+    use_volumes_ = clone_persistent_ && !spec_.overlay_drive.empty();
+    if (use_volumes_) {
+      // 盘符挂到所有工作区共享的 volumes 根，每个工作区在它下面按
+      // <工作区名>_<工作区id> 占一个目录：R:\<key>\ 就是该工作区的会话盘，
+      // 切会话不需要换盘符，也不会互相覆盖。
+      volumes_root_ = (fs::path(storage_root_).parent_path() / L"volumes").wstring();
+      clone_root_ = (fs::path(volumes_root_) / fs::path(spec_.storage_key)).wstring();
+      mount_root_ = volumes_root_;
+    } else {
+      clone_root_ = (fs::path(storage_root_) / L"workspace").wstring();
+      mount_root_ = clone_root_;
+    }
 
     const fs::path marker = fs::path(storage_root_) / L"clone.ready";
     std::error_code error;
+    const ULONGLONG prepare_started = GetTickCount64();
+    // 旧布局把会话盘放在 <storage_key>\workspace；新布局放到 volumes\<storage_key>。
+    // 同卷搬一次目录即可，manifest 与基线都跟着走，增量种子不受影响。
+    if (clone_persistent_) {
+      const fs::path legacy = fs::path(storage_root_) / L"workspace";
+      if (GetFileAttributesW(legacy.c_str()) != INVALID_FILE_ATTRIBUTES &&
+          GetFileAttributesW(clone_root_.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        std::error_code migrate_error;
+        fs::create_directories(volumes_root_, migrate_error);
+        migrate_error.clear();
+        fs::rename(legacy, clone_root_, migrate_error);
+        if (migrate_error) {
+          core::LogWarn("sandbox", "failed to move the session disk into volumes: " +
+                                       migrate_error.message());
+        }
+      }
+    }
     const bool seeded = fs::is_regular_file(marker, error) && !error &&
                         fs::is_directory(clone_root_, error) && !error;
     if (!seeded) {
+      // 上一轮播种可能超时或被中断：目录内容与进度清单都保留，交给增量续传；
+      // 删掉重来来会让大工作区永远撞在同一条超时上。
       std::error_code ignored;
-      fs::remove_all(clone_root_, ignored);
       fs::create_directories(clone_root_, ignored);
       // Grant before the first file lands so every copied entry inherits the
       // ACE at creation time; granting afterwards would walk the whole tree.
@@ -1684,7 +1887,9 @@ class SandboxEnvironment final : public runtime::IEnvironment {
       const core::Status copied =
           SeedOrSyncWorkspace(spec_.workspace_root, clone_root_, storage_root_, true, &first);
       if (!copied.ok()) {
-        RemoveCloneRoot();
+        // 保留已复制的会话盘与 seed.manifest：下一次会话从这里继续
+        core::LogWarn("sandbox", "session disk seed incomplete: " + copied.error().message +
+                                     " (" + copied.error().detail + "); resumable");
         return copied;
       }
       std::ofstream ready(marker, std::ios::trunc | std::ios::binary);
@@ -1723,13 +1928,29 @@ class SandboxEnvironment final : public runtime::IEnvironment {
       }
     }
 
-    const core::Status mapped = MapSessionDrive(drive, clone_root_);
+    // 挂载点可能是共享的 volumes 根（多工作区并列），也可能是会话盘本身。
+    // 沙箱需要能穿过 volumes 根到达自己的目录，但别的 key 目录不会被授权。
+    if (use_volumes_ && !DirectoryHasGrant(sid, mount_root_, false)) {
+      const core::Status traverse = GrantDirectory(sid, mount_root_, false, false);
+      if (!traverse.ok()) {
+        RemoveCloneRoot();
+        return traverse;
+      }
+      granted_directories_.push_back(mount_root_);
+    }
+
+    const core::Status mapped = MapSessionDrive(drive, mount_root_);
     if (!mapped.ok()) {
       RemoveCloneRoot();
       return mapped;
     }
+    core::LogInfo("sandbox", "session disk prepared in " +
+                                 std::to_string(GetTickCount64() - prepare_started) +
+                                 "ms (seeded=" + (seeded ? "1" : "0") + ")");
     clone_drive_ = drive;
-    session_workspace_ = drive + L"\\";
+    session_workspace_ = use_volumes_
+                             ? drive + L"\\" + fs::path(clone_root_).filename().wstring() + L"\\"
+                             : drive + L"\\";
     if (clone_persistent_) {
       AppendSessionJournal(storage_root_, "start " + UtcStamp() + " session=" +
                                               ToUtf8(spec_.session_id) + " source=" +
@@ -1745,8 +1966,14 @@ class SandboxEnvironment final : public runtime::IEnvironment {
   core::Status VerifySessionDiskAccess(bool write) {
     constexpr wchar_t kProbe[] = L".rvm-clone-probe";
     ProcessOptions probe;
-    probe.command_line = write ? L"cmd.exe /c \"echo rvm> .rvm-clone-probe\""
-                               : L"cmd.exe /c \"dir /b > nul\"";
+    // 一次 cmd 同时验两件事：会话盘可写、宿主用户目录不可读。
+    // AppContainer 里起 cmd 本身要 4 秒上下，分两条命令就是双倍开销。
+    probe.command_line =
+        write
+            ? L"cmd.exe /c \"echo rvm> .rvm-clone-probe & dir /b \\\"%USERPROFILE%\\\" >nul 2>&1 "
+              L"& if errorlevel 1 (echo RVM_PROFILE_DENIED) else (echo RVM_PROFILE_READABLE)\""
+            : L"cmd.exe /c \"dir /b > nul & dir /b \\\"%USERPROFILE%\\\" >nul 2>&1 "
+              L"& if errorlevel 1 (echo RVM_PROFILE_DENIED) else (echo RVM_PROFILE_READABLE)\"";
     probe.working_directory = session_workspace_;
     probe.appcontainer_sid = profile_.sid;
     probe.timeout_ms = 20000;
@@ -1759,6 +1986,9 @@ class SandboxEnvironment final : public runtime::IEnvironment {
           core::ErrorCode::kBackendFailed, "failed to verify the workspace drive from the sandbox",
           false, result.error().detail));
     }
+    const std::string& output = result.value().output;
+    if (output.find("RVM_PROFILE_DENIED") != std::string::npos) host_profile_readable_ = false;
+    else if (output.find("RVM_PROFILE_READABLE") != std::string::npos) host_profile_readable_ = true;
     if (result.value().timed_out || result.value().exit_code != 0) {
       std::string detail = "exit=" + std::to_string(result.value().exit_code);
       if (!result.value().error.empty()) detail += " " + result.value().error;
@@ -1826,6 +2056,15 @@ class SandboxEnvironment final : public runtime::IEnvironment {
   // A restriction that cannot run the probe (loader failure, timeout) is also
   // treated as a failure so a broken setup never silently starts unprotected.
   core::Status VerifyHostIsolation() {
+    // 会话盘探针已经把宿主用户目录一起测了：直接用它，省掉第二次起 cmd（约 4.4 秒）。
+    if (host_profile_readable_.has_value()) {
+      if (!*host_profile_readable_) return core::Status::Ok();
+      return core::Status::Failure(core::Error(
+          core::ErrorCode::kPolicyDenied,
+          "the sandbox can still read the host user profile", false,
+          "detected by the session-disk probe"));
+    }
+
     ProcessOptions probe;
     probe.command_line =
         L"cmd.exe /c \"dir /b \\\"%USERPROFILE%\\\" >nul 2>&1 & if errorlevel 1 "
@@ -1898,9 +2137,16 @@ class SandboxEnvironment final : public runtime::IEnvironment {
   std::wstring clone_root_;
   std::wstring clone_drive_;
   bool clone_persistent_ = false;
+  // 会话盘放在共享的 volumes 根下（只有宿主工作区这样布局）
+  bool use_volumes_ = false;
+  // 盘符实际映射到的目录：持久工作区是共享的 volumes 根，否则是会话盘自己
+  std::wstring mount_root_;
+  std::wstring volumes_root_;
   std::wstring temp_root_;
   std::wstring session_workspace_;
   std::wstring windows_build_;
+  // 会话盘探针顺带测到的宿主用户目录可读性（has_value 表示已经测过）
+  std::optional<bool> host_profile_readable_;
   std::wstring network_capability_sid_;
   std::vector<std::wstring> granted_devices_;
   bool vbs_enabled_ = false;

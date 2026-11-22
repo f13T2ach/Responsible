@@ -66,6 +66,8 @@ public interface IChatSessionService
     IReadOnlyList<DshSessionRow> Conversations { get; }
     /// <summary>真实会话列表是否已从 DSH 读取成功；此前不允许新建会话/工作区。</summary>
     bool IsConversationsLoaded { get; }
+    /// <summary>列表最终加载失败时的英文诊断；成功后为 null。</summary>
+    string? ConversationsError { get; }
     /// <summary>是否正在恢复/切换会话；历史尚未落定时内容区显示加载态而不是空态。</summary>
     bool IsSessionLoading { get; }
     string CurrentSessionId { get; }
@@ -132,4 +134,11 @@ public interface IChatSessionService
     Task<PermissionResult> EnableRvmProtectionAsync(RvmSettings? settings);
     /// <summary>保存工作区的环境变量/工具目录；正在受保护时重建会话。</summary>
     Task<PermissionResult> UpdateRvmSettingsAsync(string workspaceId, RvmSettings settings);
+    /// <summary>
+    /// 显式准备某个工作区的 RVM 会话（建会话盘、播种、挂盘），供“创建工作区”和
+    /// “首次开启隔离保护”在回到对话前调用；失败原因放在 Message 里。
+    /// </summary>
+    Task<PermissionResult> PrepareRvmWorkspaceAsync(string workspaceCwd);
+    /// <summary>删除某工作区的沙箱副本（会话盘 + 清单/日志），移除工作区时调用。</summary>
+    Task RemoveRvmWorkspaceStorageAsync(string workspaceKey);
 }

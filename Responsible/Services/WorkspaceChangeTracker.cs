@@ -19,8 +19,10 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
     private string _cwd = "";
     private int _turn;
     private bool _active;
+    // true：直接读写工作区仓库自己的 index（RVM 会话盘），不复制到临时目录
+    private bool _reuseIndex;
 
-    public async Task BeginAsync(string cwd, int turn)
+    public async Task BeginAsync(string cwd, int turn, bool useWorkspaceIndex = false)
     {
         Cleanup();
         var root = await GitAsync(cwd, ["rev-parse", "--show-toplevel"]).ConfigureAwait(false);
@@ -32,10 +34,20 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
 
         var temp = Path.Combine(Path.GetTempPath(), "Responsible-changes", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(Path.Combine(temp, "objects"));
-        var repoIndex = Path.Combine(gitDir, "index");
-        if (File.Exists(repoIndex)) File.Copy(repoIndex, Path.Combine(temp, "index"), true);
+        Dictionary<string, string>? env;
+        if (useWorkspaceIndex)
+        {
+            // RVM 会话盘是引擎自己的副本，可以放心用它的 index/objects：
+            // 首轮之后每次 add 只处理变化的文件（秒级），而不是整盘重算。
+            env = null;
+        }
+        else
+        {
+            var repoIndex = Path.Combine(gitDir, "index");
+            if (File.Exists(repoIndex)) File.Copy(repoIndex, Path.Combine(temp, "index"), true);
+            env = EnvFor(temp, gitDir);
+        }
 
-        var env = EnvFor(temp, gitDir);
         var before = await SnapshotAsync(root, env).ConfigureAwait(false);
         if (before is null)
         {
@@ -51,6 +63,7 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
             _before = before;
             _cwd = cwd;
             _turn = turn;
+            _reuseIndex = useWorkspaceIndex;
             _active = true;
         }
     }
@@ -59,6 +72,7 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
     {
         string root, temp, gitDir, before, cwd;
         int turn;
+        bool reuseIndex;
         lock (_gate)
         {
             if (!_active || _root is null || _temp is null || _gitDir is null || _before is null) return null;
@@ -68,6 +82,7 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
             before = _before;
             cwd = _cwd;
             turn = _turn;
+            reuseIndex = _reuseIndex;
             _active = false;
             _root = null;
             _temp = null;
@@ -77,7 +92,7 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
 
         try
         {
-            var env = EnvFor(temp, gitDir);
+            var env = reuseIndex ? null : EnvFor(temp, gitDir);
             var after = await SnapshotAsync(root, env).ConfigureAwait(false);
             if (after is null) return null;
             var numstat = await GitAsync(root, ["diff-tree", "-r", "-M", "--numstat", before, after], env).ConfigureAwait(false);
@@ -100,7 +115,18 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
             }
             if (files.Count == 0) return null;
             files.Sort(static (x, y) => string.CompareOrdinal(x.Display, y.Display));
-            return new ChatChanges(turn, cwd, files.Count, added, deleted, files);
+
+            // 文本文件的 unified diff 随结果一起带回去：界面点开某个文件时直接展示，
+            // 不必回头再问 git（此刻 before/after 两棵树都还在，事后就没了）。
+            var diffs = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (files.Exists(static file => !file.Binary))
+            {
+                var patch = await GitAsync(root,
+                    ["diff-tree", "-r", "-M", "-p", "--no-color", "--no-ext-diff", before, after],
+                    env).ConfigureAwait(false);
+                if (patch is not null) SplitPatchForTextFiles(patch, diffs);
+            }
+            return new ChatChanges(turn, cwd, files.Count, added, deleted, files) { Diffs = diffs };
         }
         finally
         {
@@ -110,6 +136,54 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
 
     private static int ParseInt(string s) => int.TryParse(s, out var v) ? v : 0;
 
+    // 单文件 diff 上限：太长的补丁既没人看，也会拖慢界面
+    private const int MaxDiffChars = 200_000;
+
+    /// <summary>
+    /// 把 <c>git diff-tree -p</c> 的输出按文件切开。二进制文件（docx 等）以
+    /// "Binary files ... differ" 出现，这里直接跳过——界面上只保留 M/A/D 状态。
+    /// </summary>
+    private static void SplitPatchForTextFiles(string patch, Dictionary<string, string> diffs)
+    {
+        string? currentPath = null;
+        var builder = new StringBuilder();
+        var binary = false;
+
+        void Flush()
+        {
+            if (currentPath is null || binary || builder.Length == 0) return;
+            var text = builder.ToString();
+            if (text.Length > MaxDiffChars) text = text[..MaxDiffChars] + "\n… (diff truncated)\n";
+            diffs[currentPath] = text;
+        }
+
+        foreach (var raw in patch.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            if (line.StartsWith("diff --git ", StringComparison.Ordinal))
+            {
+                Flush();
+                currentPath = null;
+                binary = false;
+                builder.Clear();
+                continue;
+            }
+            if (line.StartsWith("Binary files ", StringComparison.Ordinal) &&
+                line.EndsWith(" differ", StringComparison.Ordinal))
+            {
+                binary = true;
+                continue;
+            }
+            // 新文件的 b/ 路径就是我们要展示的键；删除文件没有 +++ 行，落到 --- 行
+            if (line.StartsWith("+++ b/", StringComparison.Ordinal))
+                currentPath = line[6..];
+            else if (currentPath is null && line.StartsWith("--- a/", StringComparison.Ordinal))
+                currentPath = line[6..];
+            builder.Append(line).Append('\n');
+        }
+        Flush();
+    }
+
     private static Dictionary<string, string> EnvFor(string temp, string gitDir) => new()
     {
         ["GIT_INDEX_FILE"] = Path.Combine(temp, "index"),
@@ -117,7 +191,7 @@ public sealed class WorkspaceChangeTracker : IWorkspaceChangeTracker
         ["GIT_ALTERNATE_OBJECT_DIRECTORIES"] = Path.Combine(gitDir, "objects"),
     };
 
-    private static async Task<string?> SnapshotAsync(string root, Dictionary<string, string> env)
+    private static async Task<string?> SnapshotAsync(string root, Dictionary<string, string>? env)
     {
         if (await GitAsync(root, ["add", "--all", "--ignore-errors"], env, allowExitOne: true).ConfigureAwait(false) is null)
             return null;

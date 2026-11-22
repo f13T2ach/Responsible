@@ -1,4 +1,4 @@
-// C# ↔ Web 通信契约。C# 侧镜像见 Responsible/Infrastructure/WebBridge.cs。
+﻿// C# ↔ Web 通信契约。C# 侧镜像见 Responsible/Infrastructure/WebBridge.cs。
 // Web → C#: window.chrome.webview.postMessage(JSON.stringify(WebMessage))
 // C# → Web: ExecuteScriptAsync("window.rwebReceive(<json string literal>)")
 
@@ -83,6 +83,8 @@ export interface WireChanges {
   added: number;
   deleted: number;
   files: WireChangedFile[];
+  /// 文本文件的 unified diff（二进制/超限文件没有条目），供右侧面板展示
+  diffs?: Record<string, string>;
 }
 
 export interface WireStats {
@@ -107,6 +109,8 @@ export type HostMessage =
   | { type: "message.update"; message: WireMessage }
   | { type: "message.done"; id: string; state: "done" | "error" }
   | { type: "changes.append"; changes: WireChanges }
+  | { type: "changes.show"; changes: WireChanges; path?: string }
+  | { type: "changes.reset"; changes?: WireChanges[] }
   | { type: "stats"; stats: WireStats }
   | { type: "toast"; text: string }
   | { type: "agent.state"; state: "running" | "idle" };
@@ -116,7 +120,8 @@ export type WebMessage =
   | { type: "copyText"; text: string }
   | { type: "branch"; id: string }
   | { type: "stop"; id: string }
-  | { type: "openLink"; href: string };
+  | { type: "openLink"; href: string }
+  | { type: "showDiff"; turn: number; path?: string; index?: number };
 
 export const defaultPalette: Palette = {
   bg: "#202020",

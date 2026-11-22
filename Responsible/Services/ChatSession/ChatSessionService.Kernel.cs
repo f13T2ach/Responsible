@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using Responsible.Localization;
@@ -11,19 +11,53 @@ public sealed partial class ChatSessionService
     private ModelOptionViewModel? CurrentOption() =>
         _catalog.ModelOptions.FirstOrDefault(o => o.IsSelected) ?? _catalog.ModelOptions.FirstOrDefault();
 
-    private async Task<bool> EnsureKernelAsync(ModelOptionViewModel? option)
+    // 启动与打开会话会并发调到这里：不串行化就会同时起两个 node 内核，
+    // 打开一个对话要等两轮内核启动。
+    private readonly SemaphoreSlim _kernelGate = new(1, 1);
+
+    private async Task<bool> EnsureKernelAsync(ModelOptionViewModel? option, bool deferRvm = false)
+    {
+        await _kernelGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            return await EnsureKernelCoreAsync(option, deferRvm).ConfigureAwait(false);
+        }
+        finally
+        {
+            _kernelGate.Release();
+        }
+    }
+
+    private async Task<bool> EnsureKernelCoreAsync(ModelOptionViewModel? option, bool deferRvm)
     {
         var (provider, modelId, apiKey) = RouteFor(option);
         var cwd = CurrentCwd();
-        // RVM 不是默认后端：只有工作区显式启用隔离保护才准备会话
-        var protect = IsRvmProtected;
+        // RVM 不是默认后端：只有工作区显式启用隔离保护才准备会话。
+        // deferRvm：启动/打开会话时先起内核，把会话盘交给后台预热（见 WarmRvmSessionAsync），
+        // 否则 10 秒的准备会一律算在“打开会话”的等待里。
+        var protect = IsRvmProtected && !deferRvm;
         if (protect)
-            await EnsureRvmWorkspaceAsync(cwd).ConfigureAwait(false);
-        else
+        {
+            // 建会话盘可能要十几秒（首次还要建索引/播种），不能让它挡住内核启动和会话列表；
+            // 超时就先带着“RVM 未就绪”把内核起起来，后续预热完成会因绑定变化重启内核。
+            var ensure = EnsureRvmWorkspaceAsync(cwd);
+            if (await Task.WhenAny(ensure, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(false) == ensure)
+                await ensure.ConfigureAwait(false);
+            else
+                _ = ensure;  // 后台继续；失败原因会写进 badge
+        }
+        else if (!deferRvm)
+        {
             await DisableRvmWorkspaceAsync().ConfigureAwait(false);
+        }
 
         var binding = protect ? RvmBinding() : null;
-        var bindingKey = BindingKey(binding);
+        // 工作区要求了隔离但会话没建起来：把真实原因交给内核，让 shell 以这条理由拒绝执行，
+        // 而不是回退到 DSH 的 ACL 沙箱后报一个误导性的权限错误。
+        var rvmUnavailable = protect && binding is null
+            ? (_rvm.Status is { Length: > 0 } status ? status : "the RVM session is not established")
+            : null;
+        var bindingKey = BindingKey(binding, rvmUnavailable);
         var cwdChanged = _newConversationCwd
                          && _activeCwd is not null
                          && !string.Equals(cwd, _activeCwd, StringComparison.OrdinalIgnoreCase);
@@ -45,7 +79,7 @@ public sealed partial class ChatSessionService
 
         var startedProvider = provider;
         var startedModel = modelId;
-        var started = await _kernel.StartAsync(provider, modelId, cwd, apiKey, binding).ConfigureAwait(false);
+        var started = await _kernel.StartAsync(provider, modelId, cwd, apiKey, binding, rvmUnavailable).ConfigureAwait(false);
         if (!started && option is null && (provider != "deepseek-official" || modelId != "deepseek-flash"))
         {
             // 本机目录里的占位模型不代表 DSH 路由，启动阶段用基线模型兜底；
@@ -54,7 +88,7 @@ public sealed partial class ChatSessionService
             startedProvider = "deepseek-official";
             startedModel = "deepseek-flash";
             started = await _kernel.StartAsync(
-                startedProvider, startedModel, cwd, apiKey, binding).ConfigureAwait(false);
+                startedProvider, startedModel, cwd, apiKey, binding, rvmUnavailable).ConfigureAwait(false);
         }
         if (!started) return false;
         _startedRvmKey = bindingKey;
@@ -171,7 +205,10 @@ public sealed partial class ChatSessionService
         var trackingRoot = IsRvmProtected && _rvmVirtualRoot is not null
             ? _rvmVirtualRoot
             : CurrentCwd();
-        await _changeTracker.BeginAsync(trackingRoot, ++_turnSeq).ConfigureAwait(false);
+        // 会话盘是引擎自己的副本，tracker 可以直接用它的 index 做增量，
+        // 否则每轮都要把整盘 1.5 万文件重新 hash（实测 65 秒才轮到模型）。
+        await _changeTracker.BeginAsync(trackingRoot, ++_turnSeq,
+            IsRvmProtected && _rvmVirtualRoot is not null).ConfigureAwait(false);
         if (await _kernel.PromptAsync(CurrentSessionId, prompt).ConfigureAwait(false) is null)
         {
             FailAssistant(id, string.IsNullOrWhiteSpace(_kernel.Status) ? "Send failed" : _kernel.Status);
@@ -251,9 +288,10 @@ public sealed partial class ChatSessionService
             _rvmWorkspaceRoot);
     }
 
-    // 绑定变化（例如首次开启 RVM 隔离保护）必须触发内核重启，否则新进程拿不到 RESPONSIBLE_RVM_TOKEN
-    private static string? BindingKey(DshRvmBinding? binding) => binding is null
-        ? null
+    // 绑定变化（例如首次开启 RVM 隔离保护）必须触发内核重启，否则新进程拿不到 RESPONSIBLE_RVM_TOKEN；
+    // 会话没建起来时把失败原因也编进 key，原因变了同样重启，让内核拿到新的拒绝理由。
+    private static string? BindingKey(DshRvmBinding? binding, string? unavailable) => binding is null
+        ? unavailable
         : string.Join('|', binding.EnginePath, binding.PipeName, binding.Token,
             binding.SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             binding.WorkspaceRoot, binding.HostWorkspaceRoot);

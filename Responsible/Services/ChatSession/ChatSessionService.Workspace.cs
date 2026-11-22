@@ -84,13 +84,96 @@ public sealed partial class ChatSessionService
         }
     }
 
+    // RVM 会话建立过程的诊断日志：状态机分支多，出问题时靠它看清走到哪一步。
+    private static readonly object RvmTraceLock = new();
+
+    internal static void RvmTrace(string message)
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Responsible", "logs");
+            Directory.CreateDirectory(directory);
+            var line = $"{DateTimeOffset.Now:yyyy-MM-ddTHH:mm:ss.fff} pid={Environment.ProcessId} {message}{Environment.NewLine}";
+            lock (RvmTraceLock)
+                File.AppendAllText(Path.Combine(directory, "rvm-session.log"), line);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    // 打开/恢复会话时补建 RVM 会话：保护只在发消息时才建立的话，界面会一直
+    // 显示普通沙箱，用户看到的就不是真实状态。
+    private async Task WarmRvmSessionAsync()
+    {
+        if (!IsRvmProtected) return;
+        try
+        {
+            await EnsureRvmWorkspaceAsync(CurrentCwd()).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            // 预热失败不影响会话本身：badge 里已经带着原因
+            return;
+        }
+
+        // 内核启动时为了不等会话盘用的是 deferRvm，patch 里并没有接管 sandbox。
+        // 这里会话盘已经就绪：让内核带着 RVM 绑定重启一次，tool 才真正进沙箱。
+        var binding = RvmBinding();
+        if (binding is null) return;
+        var key = BindingKey(binding, null);
+        if (_kernel.IsAvailable && string.Equals(key, _startedRvmKey, StringComparison.Ordinal)) return;
+        RvmTrace("warm: restarting kernel with the RVM binding");
+        await EnsureKernelAsync(null).ConfigureAwait(false);
+    }
+
+    // 创建工作区、或第一次开启隔离保护时调用：先把会话盘准备好再让用户回到对话。
+    // 失败时报的是引擎给的真实原因（badge 详情同源），界面可以如实展示。
+    public async Task<PermissionResult> PrepareRvmWorkspaceAsync(string workspaceCwd)
+    {
+        await EnsureRvmWorkspaceAsync(workspaceCwd).ConfigureAwait(false);
+        return _rvmSessionId != 0 && _rvmVirtualRoot is not null
+            ? new PermissionResult(true, _rvmVirtualRoot)
+            : new PermissionResult(false, _rvm.Status);
+    }
+
+    // 移除工作区时把它的沙箱副本一起删掉：会话盘在 volumes\<key>，清单与日志在 <key>。
+    // 不删的话共享盘符下会一直留着已移除工作区的目录。
+    public async Task RemoveRvmWorkspaceStorageAsync(string workspaceKey)
+    {
+        if (string.IsNullOrWhiteSpace(workspaceKey)) return;
+        await CloseRvmSessionAsync().ConfigureAwait(false);
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Responsible", "RVM");
+        DeleteDirectory(Path.Combine(root, "volumes", workspaceKey));
+        DeleteDirectory(Path.Combine(root, workspaceKey));
+    }
+
+    private static void DeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 盘符还没卸载或文件被占用时留给下次启动清理
+        }
+    }
+
     private async Task EnsureRvmWorkspaceCoreAsync(string workspaceCwd)
     {
         var definition = WorkspaceForCwd(workspaceCwd);
+        RvmTrace($"ensure cwd={workspaceCwd} workspace={definition?.Name ?? "<none>"} " +
+                 $"protected={definition?.RvmProtected}");
         if (definition is null || !definition.RvmProtected)
         {
             await CloseRvmSessionAsync().ConfigureAwait(false);
             SetWorkspaceBadge(string.Empty, null);
+            RvmTrace("ensure: not protected, session closed");
             return;
         }
 
@@ -100,18 +183,23 @@ public sealed partial class ChatSessionService
         if (!index.IsReady)
         {
             await CloseRvmSessionAsync().ConfigureAwait(false);
+            // 会话盘建不出来时不要让整条工具通道瘫掉：内核会保留 DSH 自带的沙箱，
+            // 这里把“已回落”说清楚，免得用户以为保护生效了。
             SetWorkspaceBadge(Loc.T("L.Session.NeedsGitIndex"),
-                index.State == RvmIndexState.GitUnavailable
-                    ? $"{index.Message} Install Git, then create an index while editing the workspace."
-                    : $"{index.Message} Open the workspace editor, enable RVM isolation, run Full index or Standard index, then reopen the conversation.");
+                $"{index.Message} Tools keep running in the default sandbox until the index exists"
+                + (index.State == RvmIndexState.GitUnavailable
+                    ? "; install Git, then create an index while editing the workspace."
+                    : "; run Full index or Standard index in the workspace editor, then reopen the conversation."));
             return;
         }
 
+        RvmTrace($"ensure: index ready={index.IndexedFiles} files");
         var key = definition.RvmKey;
         var selectedTools = ResolveSelectedTools(definition.Settings, out var toolError);
         if (selectedTools is null)
         {
             SetWorkspaceBadge(Loc.T("L.Session.ToolsNotGranted"), toolError);
+            RvmTrace($"ensure: tools rejected: {toolError}");
             return;
         }
 
@@ -127,11 +215,14 @@ public sealed partial class ChatSessionService
 
         await CloseRvmSessionAsync().ConfigureAwait(false);
 
+        var prepWatch = System.Diagnostics.Stopwatch.StartNew();
         if (!await _rvm.EnsureRunningAsync().ConfigureAwait(false))
         {
             SetWorkspaceBadge(Loc.T("L.Session.RvmUnavailable"), _rvm.Status);
+            RvmTrace($"ensure: engine unavailable: {_rvm.Status}");
             return;
         }
+        RvmTrace($"ensure: engine up {prepWatch.ElapsedMilliseconds}ms");
 
         var allTools = _acl.Grants
             .Where(grant => grant.State == AclGrantState.Authorized && grant.IsValid)
@@ -142,6 +233,7 @@ public sealed partial class ChatSessionService
             SetWorkspaceBadge(Loc.T("L.Session.RvmUnavailable"), _rvm.Status);
             return;
         }
+        RvmTrace($"ensure: tool grants {prepWatch.ElapsedMilliseconds}ms ({allTools.Length} tools)");
 
         var session = await _rvm.CreateWorkspaceSessionAsync(
                 workspaceCwd, _winFsp.DriveLetter, key, definition.Settings, selectedTools,
@@ -150,8 +242,10 @@ public sealed partial class ChatSessionService
         if (session is null)
         {
             SetWorkspaceBadge(Loc.T("L.Session.RvmUnavailable"), _rvm.Status);
+            RvmTrace($"ensure: create session failed: {_rvm.Status}");
             return;
         }
+        RvmTrace($"ensure: session created {prepWatch.ElapsedMilliseconds}ms");
 
         _rvmSessionId = session.SessionId;
         _rvmWorkspaceRoot = workspaceCwd;
@@ -167,6 +261,7 @@ public sealed partial class ChatSessionService
         var deviceNote = policy.DevicesEnabled && policy.Devices.Count > 0
             ? Loc.F("L.Session.DevicesNote", string.Join(Loc.IsChinese ? "、" : ", ", policy.Devices))
             : Loc.T("L.Session.NoDevicesNote");
+        RvmTrace($"ensure: ready root={session.VirtualRoot} id={session.SessionId}");
         SetWorkspaceBadge(
             Loc.T("L.Session.RvmReady"),
             Loc.F("L.Session.RvmReadyDetail", session.VirtualRoot.TrimEnd('\\'), workspaceCwd, toolsNote, networkNote, deviceNote));

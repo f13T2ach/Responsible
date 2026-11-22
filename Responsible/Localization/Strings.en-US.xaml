@@ -1,9 +1,10 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
 
     <!--  Common  -->
     <sys:String x:Key="L.Common.Cancel">Cancel</sys:String>
+    <sys:String x:Key="L.Common.Confirm">Confirm</sys:String>
     <sys:String x:Key="L.Common.Save">Save</sys:String>
     <sys:String x:Key="L.Common.Delete">Delete</sys:String>
     <sys:String x:Key="L.Common.Close">Close</sys:String>
@@ -38,6 +39,7 @@
     <sys:String x:Key="L.Moe.Sites">Sites</sys:String>
     <sys:String x:Key="L.Moe.User">User</sys:String>
     <sys:String x:Key="L.Moe.Workspaces">Workspaces</sys:String>
+    <sys:String x:Key="L.Moe.ConversationListError">Conversation list unavailable: {0}</sys:String>
     <sys:String x:Key="L.Moe.NewWorkspace">New workspace</sys:String>
     <sys:String x:Key="L.Moe.RvmProtected">RVM isolation</sys:String>
     <sys:String x:Key="L.Moe.WorkspaceMenu">Workspace menu</sys:String>
@@ -75,6 +77,15 @@
     <sys:String x:Key="L.Moe.Permission.WorkspaceWriteDescription">Can read and write files inside the current workspace; modifications outside it are denied</sys:String>
     <sys:String x:Key="L.Moe.Permission.FullAccessLabel">Full access</sys:String>
     <sys:String x:Key="L.Moe.Permission.FullAccessDescription">No more prompts; free access to your files, terminal, and network</sys:String>
+    <sys:String x:Key="L.Moe.Permission.NotReadyTitle">Permission cannot be changed yet</sys:String>
+    <sys:String x:Key="L.Moe.Permission.NotReadyText">The runtime for this conversation is not running. Send a message first, then switch the permission preset.</sys:String>
+    <sys:String x:Key="L.Changes.Tab">Turn {0} changes</sys:String>
+    <sys:String x:Key="L.Changes.Summary">This turn: {0} file(s) · +{1} −{2}</sys:String>
+    <sys:String x:Key="L.Changes.OpenTip">See which files changed this turn and their diffs</sys:String>
+    <sys:String x:Key="L.Changes.Close">Close the changes panel</sys:String>
+    <sys:String x:Key="L.Changes.Binary">binary</sys:String>
+    <sys:String x:Key="L.Changes.NoTextDiff">No textual diff for this file (binary files report status only).</sys:String>
+    <sys:String x:Key="L.Moe.Permission.Pending">Permission</sys:String>
     <sys:String x:Key="L.Moe.Permission.EnableRvmTitle">Enable RVM isolation</sys:String>
     <sys:String x:Key="L.Moe.Permission.EnableRvmFailed">Failed to enable RVM isolation</sys:String>
     <sys:String x:Key="L.Moe.Permission.SwitchFailed">Failed to switch permission</sys:String>
@@ -173,6 +184,9 @@
     <sys:String x:Key="L.Rvm.AclHint2">Inherited grants live only at the directory root; tools installed or updated later need no regrant.</sys:String>
 
     <!--  RVM settings dialog  -->
+    <sys:String x:Key="L.RvmSettings.IndexWarning">No Git index yet. If you do not know what a Git index is, or do not need one, run the automatic index: it indexes the whole folder as the workspace once.</sys:String>
+    <sys:String x:Key="L.RvmSettings.AutoIndex">Index automatically</sys:String>
+    <sys:String x:Key="L.RvmSettings.AutoIndexBusy">Indexing — larger folders take longer…</sys:String>
     <sys:String x:Key="L.RvmSettings.EnvDesc">The sandbox provides a clean set of environment variables by default. Select any variables that should also be exposed to the AI; values are read when the sandbox starts and are not written to disk. When PATH is selected, absolute local directories from the host PATH are appended to the sandbox PATH; relative paths, UNC paths, the workspace, and temporary directories are ignored.</sys:String>
     <sys:String x:Key="L.RvmSettings.EnvVars">Environment variables</sys:String>
     <sys:String x:Key="L.RvmSettings.Selected">{0} selected</sys:String>
@@ -186,6 +200,26 @@
 
     <!--  Workspace editor  -->
     <sys:String x:Key="L.Workspace.New">New workspace</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveConfirmTitle">Remove workspace</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveConfirmText">Removes "{0}" and its {1} conversation(s). This cannot be undone.</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveConfirmTextRvm">Removes "{0}", its {1} conversation(s), and its sandbox session disk. This cannot be undone.</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveUnsyncedTitle">This workspace has unsynced changes</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveUnsyncedText">"{0}" still has {1} change(s) in the sandbox that were never synced back to the host workspace. Removing it deletes {2} conversation(s) and the sandbox session disk.</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveSyncThenRemove">Sync, then remove</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveWithoutSync">Remove without syncing</sys:String>
+    <sys:String x:Key="L.Rvm.OpenSettings">RVM settings</sys:String>
+    <sys:String x:Key="L.Rvm.OpenSettingsTip">Open this workspace's RVM settings</sys:String>
+    <sys:String x:Key="L.Rvm.QuickSync">Sync</sys:String>
+    <sys:String x:Key="L.Rvm.QuickSyncTip">Sync sandbox changes back to the host workspace</sys:String>
+    <sys:String x:Key="L.Rvm.QuickRollback">Rollback</sys:String>
+    <sys:String x:Key="L.Rvm.QuickRollbackTip">Discard sandbox changes and restore the session disk</sys:String>
+    <sys:String x:Key="L.Rvm.RollbackConfirmTitle">Roll back sandbox changes</sys:String>
+    <sys:String x:Key="L.Rvm.RollbackConfirmText">This discards all of the AI work and restores the session disk to the current local state. Continue?</sys:String>
+    <sys:String x:Key="L.Rvm.SyncFailed">Sync failed</sys:String>
+    <sys:String x:Key="L.Rvm.RollbackFailed">Rollback failed</sys:String>
+    <sys:String x:Key="L.Workspace.Preparing">Preparing the workspace</sys:String>
+    <sys:String x:Key="L.Workspace.PreparingDetail">Building the isolated session disk and copying the version-controlled files. The first run can take a moment.</sys:String>
+    <sys:String x:Key="L.Workspace.PrepareFailed">The workspace was created, but the isolated sandbox is not ready</sys:String>
     <sys:String x:Key="L.Workspace.FallbackName">Workspace</sys:String>
     <sys:String x:Key="L.Workspace.Location">Location</sys:String>
     <sys:String x:Key="L.Workspace.ThisPc">This PC</sys:String>

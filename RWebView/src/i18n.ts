@@ -1,4 +1,4 @@
-export type Locale = "zh-CN" | "en-US";
+﻿export type Locale = "zh-CN" | "en-US";
 
 type Dict = Record<string, string>;
 
@@ -45,6 +45,9 @@ const zh: Dict = {
   "changes.binary": "二进制",
   "changes.oversized": "过大",
   "changes.more": "还有 {0} 个文件",
+  "changes.panel": "本轮改动 {0} 个文件 · +{1} -{2}",
+  "changes.noDiff": "这个文件没有可展示的文本差异。",
+  "changes.binaryHint": "二进制文件只记录状态，不展示内容差异。",
   "stats.title": "调用统计",
   "stats.rounds": "轮",
   "stats.steps": "步",
@@ -104,6 +107,9 @@ const en: Dict = {
   "changes.binary": "Binary",
   "changes.oversized": "Too large",
   "changes.more": "{0} more files",
+  "changes.panel": "This turn: {0} files · +{1} -{2}",
+  "changes.noDiff": "No textual diff for this file.",
+  "changes.binaryHint": "Binary files report status only.",
   "stats.title": "Call stats",
   "stats.rounds": "rounds",
   "stats.steps": "steps",

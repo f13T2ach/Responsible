@@ -1,4 +1,4 @@
-import type { WireChanges, WireMessage, WirePart, WireTool, WireUsage } from "./bridge";
+﻿import type { WireChanges, WireMessage, WirePart, WireTool, WireUsage } from "./bridge";
 import { renderMarkdown, type CodeBlock } from "./markdown";
 import { getLocale, t } from "./i18n";
 import { TurnRail, type TurnSource } from "./turn-rail";
@@ -143,11 +143,16 @@ export class HistoryView {
   private readonly favCache = new Map<string, string | null>();
   private readonly favPending = new Set<string>();
   private stick = true;
+  private lastScrollTop = 0;
   private smoothing = false;
 
   onAction: (action: HistoryAction, id: string) => void = () => {};
   onCopyCode: (code: string) => void = () => {};
   onOpenLink: (href: string) => void = () => {};
+  // 点击改动文件：打开右侧 diff 面板，而不是让宿主去打开源文件
+  // index 是这张卡片在 changeList 里的位置：轮次号会在重启后重新计数，用它定位最可靠
+  onShowDiff: (changes: WireChanges, path: string, index: number) => void = () => {};
+  onToggleDiff: (changes: WireChanges) => void = () => {};
 
   constructor(mount: HTMLElement) {
     this.scroll = document.createElement("div");
@@ -173,11 +178,21 @@ export class HistoryView {
         else return;
       }
       this.stick = gap < 48;
+      this.lastScrollTop = this.scroll.scrollTop;
       this.jump.classList.toggle("show", !this.stick && this.messages.length > 0);
     });
     this.scroll.addEventListener("wheel", () => {
       this.smoothing = false;
     }, { passive: true });
+    // 右侧改动面板展开/收起会改变这个容器的宽度，重排会把滚动位置顶回顶部。
+    // 记住最近一次滚动位置：贴底时继续贴底，否则原地恢复。
+    new ResizeObserver(() => {
+      if (this.stick) {
+        this.scroll.scrollTop = this.scroll.scrollHeight;
+        return;
+      }
+      this.scroll.scrollTop = this.lastScrollTop;
+    }).observe(this.scroll);
     this.jump.addEventListener("click", () => {
       this.stick = true;
       this.jump.classList.remove("show");
@@ -201,7 +216,11 @@ export class HistoryView {
       }
       const changesHead = target.closest<HTMLButtonElement>(".changes-head");
       if (changesHead) {
-        changesHead.closest(".msg-changes")?.classList.toggle("open");
+        const card = changesHead.closest<HTMLElement>(".msg-changes");
+        card?.classList.toggle("open");
+        const turn = card?.dataset.turn;
+        const changes = this.changeList.find((item) => String(item.turn) === turn);
+        if (changes !== undefined) this.onToggleDiff(changes);
         return;
       }
       const toolHead = target.closest<HTMLButtonElement>(".tool-head");
@@ -211,7 +230,12 @@ export class HistoryView {
       }
       const changeFile = target.closest<HTMLButtonElement>(".change-file");
       if (changeFile) {
-        this.onOpenLink(changeFile.dataset.path ?? "");
+        const card = changeFile.closest<HTMLElement>(".msg-changes");
+        const turn = card?.dataset.turn;
+        const changes = this.changeList.find((item) => String(item.turn) === turn);
+        if (changes !== undefined) {
+          this.onShowDiff(changes, changeFile.dataset.path ?? "", this.changeList.indexOf(changes));
+        }
         return;
       }
       const codeBtn = target.closest<HTMLButtonElement>(".code-copy");
@@ -836,11 +860,20 @@ export class HistoryView {
     return pill;
   }
 
+  /** 历史重放：整批替换改动卡片（重启后把每一轮的记录放回去）。 */
+  replaceChanges(changes: WireChanges[]): void {
+    for (const node of this.changeNodes) node.remove();
+    this.changeNodes.length = 0;
+    this.changeList.length = 0;
+    for (const item of changes) this.appendChanges(item);
+  }
+
   appendChanges(changes: WireChanges): void {
     if (changes.total <= 0) return;
     this.changeList.push(changes);
     const card = document.createElement("div");
     card.className = "msg-changes open";
+    card.dataset.turn = String(changes.turn);
     const head = document.createElement("button");
     head.type = "button";
     head.className = "changes-head";

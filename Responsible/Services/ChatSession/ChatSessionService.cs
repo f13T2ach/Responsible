@@ -38,6 +38,8 @@ public sealed partial class ChatSessionService : IChatSessionService
     // 先放上次的列表占位，真实列表由内核就绪后的刷新替换
     private IReadOnlyList<DshSessionRow> _conversations = LoadConversationsCache();
     private volatile bool _conversationsLoaded;
+    // 列表读取最终失败时的诊断（英文原文）；成功刷新后清空
+    private volatile string? _conversationsError;
     private string _sessionId = Guid.NewGuid().ToString("n");
     // 新建会话要落在的工作区目录；为空时用应用默认根目录
     private string? _sessionCwd;
@@ -121,6 +123,8 @@ public sealed partial class ChatSessionService : IChatSessionService
     }
 
     public bool IsConversationsLoaded => _conversationsLoaded;
+
+    public string? ConversationsError => _conversationsError;
 
     public bool IsSessionLoading => _sessionLoading;
 

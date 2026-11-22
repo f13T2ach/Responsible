@@ -51,6 +51,13 @@ public partial class WorkspaceItemViewModel : ObservableObject
     [ObservableProperty]
     private bool _isExpanded;
 
+    // 会话盘里有还没同步回宿主的改动：标题后面显示绿色 *
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DirtyMark))]
+    private bool _isDirty;
+
+    public string DirtyMark => IsDirty ? " *" : string.Empty;
+
     public ObservableCollection<ConversationItemViewModel> Conversations { get; } = [];
 
     [RelayCommand(CanExecute = nameof(CanStart))]

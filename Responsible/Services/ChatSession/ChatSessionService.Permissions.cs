@@ -112,8 +112,20 @@ public sealed partial class ChatSessionService
     }
 
     // 开启当前工作区的 RVM 隔离保护；settings 为 null 表示沿用已保存的选择。
-    public Task<PermissionResult> EnableRvmProtectionAsync(RvmSettings? settings) =>
-        SetRvmProtectionAsync(true, settings);
+    // 会话盘的范围来自 Git 索引：先在写设置之前确认索引可用，否则会落进
+    // “开了保护但沙箱起不来、所有命令都被拒绝”的状态。
+    public async Task<PermissionResult> EnableRvmProtectionAsync(RvmSettings? settings)
+    {
+        var workspace = WorkspaceForCwd(CurrentCwd());
+        if (workspace is null) return new PermissionResult(false, "No workspace matches the current directory.");
+        var index = await RvmWorkspaceIndex.InspectAsync(workspace.Directory).ConfigureAwait(false);
+        if (!index.IsReady)
+        {
+            // 设置对话框里有一键“自动索引”，所以这里直接把用户指过去
+            return new PermissionResult(false, Loc.T("L.RvmSettings.IndexWarning"));
+        }
+        return await SetRvmProtectionAsync(true, settings).ConfigureAwait(false);
+    }
 
     // 修改已保存的 RVM 设置；若该工作区正受保护，重启内核让新 PATH/ACL 生效。
     public async Task<PermissionResult> UpdateRvmSettingsAsync(string workspaceId, RvmSettings settings)

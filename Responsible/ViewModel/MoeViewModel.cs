@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -23,6 +23,7 @@ public partial class MoeViewModel : ObservableObject
     private readonly IWorkspaceEditorService _workspaceEditor;
     private readonly IContentDialogService _dialogs;
     private readonly IAclAuthorizationService _acl;
+    private readonly IWorkspacePreparation _preparation;
     private IReadOnlyList<DshSessionRow> _lastRows = [];
 
     [ObservableProperty]
@@ -48,6 +49,10 @@ public partial class MoeViewModel : ObservableObject
     [ObservableProperty]
     private bool _isPermissionAvailable;
 
+    // 下拉是否可点：内核就绪才是 true，但控件本身一直可见
+    [ObservableProperty]
+    private bool _permissionEnabled;
+
     [ObservableProperty]
     private string _permissionLabel = string.Empty;
 
@@ -69,6 +74,10 @@ public partial class MoeViewModel : ObservableObject
     [NotifyCanExecuteChangedFor(nameof(CreateWorkspaceCommand))]
     private bool _isConversationsLoaded;
 
+    // 列表最终加载失败时的英文诊断；加载中或成功时为空
+    [ObservableProperty]
+    private string? _conversationsError;
+
     // 恢复上次会话期间：内容区显示加载态，输入区禁用并显示加载文案
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendPromptCommand))]
@@ -81,13 +90,15 @@ public partial class MoeViewModel : ObservableObject
         IWorkspaceStore workspaceStore,
         IWorkspaceEditorService workspaceEditor,
         IContentDialogService dialogs,
-        IAclAuthorizationService acl)
+        IAclAuthorizationService acl,
+        IWorkspacePreparation preparation)
     {
         _messenger = messenger;
         _workspaceStore = workspaceStore;
         _workspaceEditor = workspaceEditor;
         _dialogs = dialogs;
         _acl = acl;
+        _preparation = preparation;
         Session = session;
         ModelOptions = catalog.ModelOptions;
         _selectedModelOption = ModelOptions.FirstOrDefault(o => o.IsSelected) ?? ModelOptions.FirstOrDefault();
@@ -106,6 +117,7 @@ public partial class MoeViewModel : ObservableObject
         messenger.Register<ConversationsChangedMessage>(this, (_, m) => Ui(() =>
         {
             IsConversationsLoaded = true;
+            ConversationsError = Session.ConversationsError;
             RebuildWorkspaces(m.Value);
         }));
         messenger.Register<ModelOptionsChangedMessage>(this, (_, _) => Ui(() =>
@@ -118,11 +130,11 @@ public partial class MoeViewModel : ObservableObject
         session.WorkspaceBadgeChanged += OnWorkspaceBadgeChanged;
         // 页面是 transient：先用服务里已有的列表（上次运行缓存）铺开，再拉一次最新数据（内核未就绪时由 InitializeAsync 负责）
         IsConversationsLoaded = session.IsConversationsLoaded;
+        ConversationsError = session.ConversationsError;
         IsSessionLoading = session.IsSessionLoading;
         RebuildWorkspaces(session.Conversations);
         RefreshPermissionUi();
         _ = session.InitializeAsync();
-        _ = session.RefreshConversationsAsync();
     }
 
     public IChatSessionService Session { get; }
@@ -132,6 +144,20 @@ public partial class MoeViewModel : ObservableObject
     public ObservableCollection<PermissionOptionViewModel> PermissionOptions { get; } = [];
 
     public ObservableCollection<WorkspaceItemViewModel> Workspaces { get; } = [];
+
+    // 右侧改动列是否展开（由对话区的“已编辑 n 个文件”卡片触发）
+    [ObservableProperty]
+    private bool _isDiffOpen;
+
+    public WorkspaceChangesViewModel Changes { get; } = new();
+
+    [RelayCommand]
+    private void ToggleChangesPanel() => IsDiffOpen = !IsDiffOpen;
+
+    public bool HasConversationsError => !string.IsNullOrEmpty(ConversationsError);
+
+    public string ConversationsErrorText =>
+        ConversationsError is { } detail ? Loc.F("L.Moe.ConversationListError", detail) : string.Empty;
 
     public int Rounds => Session.Stats.Rounds;
 
@@ -156,7 +182,14 @@ public partial class MoeViewModel : ObservableObject
         RebuildWorkspaces(_lastRows);
         RefreshPermissionUi();
         RaiseStatsChanged();
+        OnConversationsErrorChanged(ConversationsError);
         OnWorkspaceBadgeChanged();
+    }
+
+    partial void OnConversationsErrorChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasConversationsError));
+        OnPropertyChanged(nameof(ConversationsErrorText));
     }
 
     private void RaiseStatsChanged()
@@ -189,6 +222,8 @@ public partial class MoeViewModel : ObservableObject
         SelectedConversation = item;
         foreach (var conversation in Workspaces.SelectMany(workspace => workspace.Conversations))
             conversation.IsActive = ReferenceEquals(conversation, item);
+        // 选中即切换了 cwd：权限栏与 RVM 快捷控件要跟着这个工作区走
+        RefreshPermissionUi();
     }
 
     private void RebuildWorkspaces(IReadOnlyList<DshSessionRow> rows)
@@ -318,11 +353,103 @@ public partial class MoeViewModel : ObservableObject
         }
     }
 
-    private void RemoveWorkspace(WorkspaceItemViewModel workspace)
+    private void RemoveWorkspace(WorkspaceItemViewModel workspace) => _ = RemoveWorkspaceAsync(workspace);
+
+    private enum RvmRemoveChoice { Cancel, SyncThenRemove, RemoveAnyway }
+
+    // 移除工作区要收干净：受保护工作区若有未同步的改动先问，再连同对话与沙箱副本一起移除，
+    // 否则定义删掉后它的会话会退回“按 cwd 分组的隐式工作区”，看起来像没删掉。
+    // 产品决定（2026-11）：移除 = 连对话一起删除，不做迁移或保留。
+    private async Task RemoveWorkspaceAsync(WorkspaceItemViewModel workspace)
     {
-        if (workspace.DefinitionId is null) return;
-        _workspaceStore.Remove(workspace.DefinitionId);
-        RebuildWorkspaces(_lastRows);
+        if (workspace.DefinitionId is not { Length: > 0 } id) return;
+        var definition = _workspaceStore.All.FirstOrDefault(item => item.Id == id);
+        if (definition is null) return;
+
+        var isCurrent = string.Equals(definition.Directory, Session.CurrentWorkspace?.Directory,
+            StringComparison.OrdinalIgnoreCase);
+        RvmWorkspaceDiff? diff = null;
+        if (definition.RvmProtected && Session.HasActiveRvmSession && isCurrent)
+            diff = await Session.DiffRvmWorkspaceAsync();
+
+        var unsynced = diff?.Changes.Count ?? 0;
+        var conversations = workspace.Conversations.Count;
+        if (unsynced > 0)
+        {
+            var choice = await ShowUnsyncedRemoveAsync(workspace.Name, unsynced, conversations);
+            if (choice == RvmRemoveChoice.Cancel) return;
+            if (choice == RvmRemoveChoice.SyncThenRemove)
+            {
+                var applied = await Session.SyncRvmWorkspaceAsync(all: true);
+                if (applied is null)
+                {
+                    await ShowFailureAsync(Loc.T("L.Rvm.SyncFailed"), (Session.WorkspaceBadgeDetail ?? Session.WorkspaceBadge ?? string.Empty));
+                    return;
+                }
+            }
+        }
+        else if (!await ConfirmRemoveWorkspaceAsync(workspace.Name, conversations, definition.RvmProtected))
+        {
+            return;
+        }
+
+        foreach (var conversation in workspace.Conversations
+                     .Select(c => c.SessionId)
+                     .OfType<string>()
+                     .Where(id => id.Length > 0)
+                     .ToList())
+            await Session.DeleteConversationAsync(conversation);
+
+        // 沙箱副本也一起删：否则共享盘符下会留着已移除工作区的目录
+        if (definition.RvmProtected) await Session.RemoveRvmWorkspaceStorageAsync(definition.RvmKey);
+
+        _workspaceStore.Remove(id);
+        RebuildWorkspaces(Session.Conversations);
+    }
+
+    private async Task<RvmRemoveChoice> ShowUnsyncedRemoveAsync(string name, int changes, int conversations)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = Loc.T("L.Workspace.RemoveUnsyncedTitle"),
+            Content = new System.Windows.Controls.TextBlock
+            {
+                Text = Loc.F("L.Workspace.RemoveUnsyncedText", name, changes, conversations),
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+            },
+            PrimaryButtonText = Loc.T("L.Workspace.RemoveSyncThenRemove"),
+            SecondaryButtonText = Loc.T("L.Workspace.RemoveWithoutSync"),
+            CloseButtonText = Loc.T("L.Common.Cancel"),
+            DialogWidth = 520,
+            DialogHeight = 320,
+        };
+        var result = await ShowDialogAsync(dialog);
+        return result switch
+        {
+            ContentDialogResult.Primary => RvmRemoveChoice.SyncThenRemove,
+            ContentDialogResult.Secondary => RvmRemoveChoice.RemoveAnyway,
+            _ => RvmRemoveChoice.Cancel,
+        };
+    }
+
+    private async Task<bool> ConfirmRemoveWorkspaceAsync(string name, int conversations, bool rvmProtected)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = Loc.T("L.Workspace.RemoveConfirmTitle"),
+            Content = new System.Windows.Controls.TextBlock
+            {
+                Text = rvmProtected
+                    ? Loc.F("L.Workspace.RemoveConfirmTextRvm", name, conversations)
+                    : Loc.F("L.Workspace.RemoveConfirmText", name, conversations),
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+            },
+            PrimaryButtonText = Loc.T("L.Common.Remove"),
+            CloseButtonText = Loc.T("L.Common.Cancel"),
+            DialogWidth = 480,
+            DialogHeight = 280,
+        };
+        return await ShowDialogAsync(dialog) == ContentDialogResult.Primary;
     }
 
     private static string WorkspaceName(string cwd)
@@ -374,37 +501,52 @@ public partial class MoeViewModel : ObservableObject
 
     public string WorkspaceBadge => Session.WorkspaceBadge;
 
-    public bool PermissionIsRvmProtection => Session.IsRvmProtected;
+    // 只有 RVM 会话真的挂着时才算“受 RVM 保护”；否则会把普通 preset 也染成保护色
+    public bool PermissionIsRvmProtection => Session.IsRvmProtected && Session.HasActiveRvmSession;
 
     public string? WorkspaceBadgeDetail => Session.WorkspaceBadgeDetail;
 
     public bool IsWorkspaceBadgeVisible => !string.IsNullOrEmpty(Session.WorkspaceBadge);
+
+    // 受保护且会话盘已挂载时，输入框旁出现“RVM 设置 + 同步/撤销”快捷控件
+    [ObservableProperty]
+    private bool _isRvmControlsVisible;
 
     private void OnWorkspaceBadgeChanged() => Ui(() =>
     {
         OnPropertyChanged(nameof(WorkspaceBadge));
         OnPropertyChanged(nameof(WorkspaceBadgeDetail));
         OnPropertyChanged(nameof(IsWorkspaceBadgeVisible));
+        // 受保护工作区的对话里给出本区 RVM 控件；会话盘未就绪时同步/撤销会如实报错
+        IsRvmControlsVisible = Session.IsRvmProtected;
+        // 会话盘建立/关闭会改变“是否真的在 RVM 里”，下拉文案与配色要跟着变，
+        // 否则会出现 badge 显示 RVM 就绪、下拉还写着普通 preset 的情况。
+        RefreshPermissionUi();
+        if (IsRvmControlsVisible) _ = RefreshRvmDirtyAsync();
     });
 
     private void RefreshPermissionUi()
     {
         var catalog = Session.PermissionCatalog;
         var value = Session.PermissionValue;
-        var protectedByRvm = Session.IsRvmProtected;
+        var protectedByRvm = Session.IsRvmProtected && Session.HasActiveRvmSession;
         OnPropertyChanged(nameof(PermissionIsRvmProtection));
-        PermissionOptions.Clear();
+        IsRvmControlsVisible = Session.IsRvmProtected;
+        if (Session.IsRvmProtected) _ = RefreshRvmDirtyAsync();
+
         if (catalog is null || value is null)
         {
+            // 内核还没就绪（首启、重启、刚切会话）：把下拉置灰而不是整块藏起来，
+            // 文案保留上一次的值，避免控件忽隐忽现、菜单打开是空的。
+            PermissionEnabled = false;
             IsPermissionAvailable = false;
-            PermissionLabel = string.Empty;
-            PermissionIcon = default;
-            PermissionHasIcon = false;
-            PermissionDescription = null;
-            PermissionIsDangerous = false;
+            if (string.IsNullOrEmpty(PermissionLabel))
+                PermissionLabel = Loc.T("L.Moe.Permission.Pending");
             return;
         }
 
+        PermissionEnabled = true;
+        PermissionOptions.Clear();
         PermissionOptions.Add(new PermissionOptionViewModel
         {
             Value = ChatSessionService.RvmPresetValue,
@@ -461,6 +603,13 @@ public partial class MoeViewModel : ObservableObject
     private async Task SelectPermission(PermissionOptionViewModel? option)
     {
         if (option is null) return;
+        if (!PermissionEnabled)
+        {
+            // 内核还没起时下拉是置灰的：这里再兜一层，避免“点了没反应”
+            await ShowFailureAsync(Loc.T("L.Moe.Permission.NotReadyTitle"),
+                Loc.T("L.Moe.Permission.NotReadyText"));
+            return;
+        }
 
         if (option.IsRvmProtection)
         {
@@ -474,7 +623,10 @@ public partial class MoeViewModel : ObservableObject
                 if (settings is null && !await ConfirmRvmSkipSettingsAsync()) return;
             }
 
-            var enabled = await Session.EnableRvmProtectionAsync(settings);
+            var enabled = await _preparation.RunAsync(
+                Loc.T("L.Workspace.Preparing"),
+                Loc.T("L.Workspace.PreparingDetail"),
+                () => Session.EnableRvmProtectionAsync(settings));
             if (enabled.Ok)
             {
                 RebuildWorkspaces(_lastRows);
@@ -497,6 +649,92 @@ public partial class MoeViewModel : ObservableObject
     private void EditWorkspaceRvmSettings(WorkspaceItemViewModel item) =>
         _ = EditWorkspaceRvmSettingsAsync(item);
 
+    private DateTime _lastRvmDirtyProbe = DateTime.MinValue;
+    private bool _rvmDirtyProbeBusy;
+
+    private WorkspaceItemViewModel? CurrentWorkspaceItem() =>
+        Workspaces.FirstOrDefault(workspace => workspace.DefinitionId is not null
+            && string.Equals(workspace.Cwd, Session.CurrentWorkspace?.Directory,
+                StringComparison.OrdinalIgnoreCase));
+
+    // 会话盘里有没有还没同步回宿主的改动：标题上的绿色 * 用它。
+    // RVM 默认不即时与宿主同步，所以这个标记只在会话活着、能读到 diff 时才有意义；
+    // 冷工作区不显示 *，也不做“猜测式”标记。
+    private async Task RefreshRvmDirtyAsync()
+    {
+        if (!Session.IsRvmProtected || !Session.HasActiveRvmSession) return;
+        if (_rvmDirtyProbeBusy) return;
+        if (DateTime.UtcNow - _lastRvmDirtyProbe < TimeSpan.FromSeconds(4)) return;
+        _lastRvmDirtyProbe = DateTime.UtcNow;
+        _rvmDirtyProbeBusy = true;
+        try
+        {
+            var diff = await Session.DiffRvmWorkspaceAsync().ConfigureAwait(false);
+            var dirty = diff is { Changes.Count: > 0 };
+            Ui(() =>
+            {
+                var item = CurrentWorkspaceItem();
+                if (item is not null) item.IsDirty = dirty;
+            });
+        }
+        finally
+        {
+            _rvmDirtyProbeBusy = false;
+        }
+    }
+
+    private async Task<bool> ConfirmRollbackRvmAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            Title = Loc.T("L.Rvm.RollbackConfirmTitle"),
+            Content = new System.Windows.Controls.TextBlock
+            {
+                Text = Loc.T("L.Rvm.RollbackConfirmText"),
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+            },
+            PrimaryButtonText = Loc.T("L.Common.Confirm"),
+            CloseButtonText = Loc.T("L.Common.Cancel"),
+            DialogWidth = 460,
+            DialogHeight = 260,
+        };
+        return await ShowDialogAsync(dialog) == ContentDialogResult.Primary;
+    }
+
+    [RelayCommand]
+    private void OpenWorkspaceRvmSettings()
+    {
+        var item = CurrentWorkspaceItem();
+        if (item is not null) EditWorkspaceRvmSettings(item);
+    }
+
+    [RelayCommand]
+    private async Task SyncRvmWorkspace()
+    {
+        var applied = await Session.SyncRvmWorkspaceAsync(all: true);
+        if (applied is null)
+        {
+            await ShowFailureAsync(Loc.T("L.Rvm.SyncFailed"), (Session.WorkspaceBadgeDetail ?? Session.WorkspaceBadge ?? string.Empty));
+            return;
+        }
+        _lastRvmDirtyProbe = DateTime.MinValue;
+        await RefreshRvmDirtyAsync();
+    }
+
+    [RelayCommand]
+    private async Task RollbackRvmWorkspace()
+    {
+        if (!await ConfirmRollbackRvmAsync()) return;
+        var rolledBack = await Session.RollbackRvmWorkspaceAsync();
+        if (rolledBack is null or false)
+        {
+            await ShowFailureAsync(Loc.T("L.Rvm.RollbackFailed"), (Session.WorkspaceBadgeDetail ?? Session.WorkspaceBadge ?? string.Empty));
+            return;
+        }
+        _lastRvmDirtyProbe = DateTime.MinValue;
+        await RefreshRvmDirtyAsync();
+    }
+
     private async Task EditWorkspaceRvmSettingsAsync(WorkspaceItemViewModel item)
     {
         if (item.DefinitionId is not { Length: > 0 } id) return;
@@ -512,7 +750,11 @@ public partial class MoeViewModel : ObservableObject
 
     private async Task<RvmSettings?> ShowRvmSettingsDialogAsync(string title, WorkspaceDefinition? definition)
     {
-        var viewModel = new RvmSettingsViewModel(_acl);
+        // 办公工作区通常不是 Git 仓库：这里先测一次索引，让对话框一打开就说明
+        // “需要索引”，并给出自动索引按钮。
+        var directory = definition?.Directory ?? Session.CurrentWorkspace?.Directory;
+        var viewModel = new RvmSettingsViewModel(_acl, directory);
+        await viewModel.RefreshIndexAsync();
         viewModel.Load(definition?.ExposedEnvironment ?? [], definition?.ExposedTools ?? [],
             definition?.RvmConfigured ?? false);
         var dialog = new ContentDialog

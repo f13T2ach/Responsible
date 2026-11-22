@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows;
 using System.Windows.Media;
@@ -81,7 +81,8 @@ public sealed record WireChanges(
     int Total,
     int Added,
     int Deleted,
-    IReadOnlyList<WireChangedFile> Files);
+    IReadOnlyList<WireChangedFile> Files,
+    IReadOnlyDictionary<string, string>? Diffs = null);
 
 public sealed record HostInit(
     int Protocol,
@@ -141,6 +142,17 @@ public sealed record HostChangesAppend(WireChanges Changes)
     public string Type => "changes.append";
 }
 
+public sealed record HostChangesShow(WireChanges Changes, string? Path = null)
+{
+    public string Type => "changes.show";
+}
+
+// 历史重放后整批替换改动卡片（重启应用时把它们放回去）
+public sealed record HostChangesReset(IReadOnlyList<WireChanges> Changes)
+{
+    public string Type => "changes.reset";
+}
+
 public sealed record HostToast(string Text)
 {
     public string Type => "toast";
@@ -166,7 +178,11 @@ public sealed record HostAgentState(string State)
     public string Type => "agent.state";
 }
 
-public sealed record WebMessage(string Type, int? Protocol = null, string? Text = null, string? Id = null, string? Href = null);
+/// <summary>对话区请求打开某一轮的改动 diff；Path 为空表示看这一轮的第一个文件。</summary>
+public sealed record DiffRequest(int Turn, string? Path, int? Index = null);
+
+public sealed record WebMessage(string Type, int? Protocol = null, string? Text = null, string? Id = null,
+    string? Href = null, int? Turn = null, string? Path = null, int? Index = null);
 
 public static class WebBridge
 {

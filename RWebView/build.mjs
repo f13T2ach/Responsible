@@ -1,4 +1,4 @@
-import { build } from "esbuild";
+﻿import { build } from "esbuild";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 
 const replaceAsync = async (text, pattern, replacer) => {
@@ -49,6 +49,24 @@ const html = template
   .replace("/*__CSS__*/", () => `${katexCss}\n${css.outputFiles[0].text}`)
   .replace("/*__JS__*/", () => js.outputFiles[0].text);
 
+// 右侧改动面板是独立页面：宿主用另一个 WebView2 承载，与对话区并排
+const diffJs = await build({
+  entryPoints: ["src/diff-main.ts"],
+  bundle: true,
+  format: "iife",
+  target: "chrome100",
+  minify: true,
+  write: false,
+  legalComments: "none",
+});
+
+const diffTemplate = await readFile("src/diff.html", "utf8");
+const diffHtml = diffTemplate
+  .replace("/*__CSS__*/", () => css.outputFiles[0].text)
+  .replace("/*__JS__*/", () => diffJs.outputFiles[0].text);
+
 await mkdir("dist", { recursive: true });
 await writeFile("dist/index.html", html);
 console.log(`dist/index.html ${(html.length / 1024).toFixed(1)} KB`);
+await writeFile("dist/diff.html", diffHtml);
+console.log(`dist/diff.html ${(diffHtml.length / 1024).toFixed(1)} KB`);

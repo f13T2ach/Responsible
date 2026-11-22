@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.Messaging;
 using Responsible.Messages;
@@ -18,7 +18,19 @@ public sealed partial class ChatSessionService
     public async Task InitializeAsync()
     {
         if (Interlocked.Exchange(ref _initializeStarted, 1) == 1) return;
-        if (!await EnsureKernelAsync(null).ConfigureAwait(false))
+        // 先确定要恢复的会话目录：否则 EnsureKernelAsync 会按“目录未知”去判断工作区，
+        // 受保护工作区的 RVM 会话会被直接跳过，而内核一旦就绪，后续调用又会因为
+        // 绑定相同而一直早退——这就是“明明在 RVM 里却一直是普通沙箱”的来源。
+        lock (_gate)
+        {
+            if (_sessionCwd is null)
+                _sessionCwd = NormalizeCwd(
+                    _conversations.FirstOrDefault(row => row.SessionId == _restoredSessionId)?.Cwd);
+        }
+        // 启动阶段不等 RVM 会话：先把内核与会话列表拉起来，RVM 在末尾预热
+        var initWatch = System.Diagnostics.Stopwatch.StartNew();
+        RvmTrace("init: begin");
+        if (!await EnsureKernelAsync(null, deferRvm: true).ConfigureAwait(false))
         {
             // 内核不可用时恢复无从发生，别让加载态一直挂着
             SetSessionLoading(false);
@@ -26,12 +38,15 @@ public sealed partial class ChatSessionService
             return;
         }
 
+        RvmTrace($"init: kernel up {initWatch.ElapsedMilliseconds}ms");
         var conversations = RefreshConversationsWithRetryAsync();
         var permissions = LoadPermissionCatalogAsync();
         if (!string.IsNullOrEmpty(_restoredSessionId))
             await ReloadSessionAsync(_restoredSessionId, resume: true).ConfigureAwait(false);
         await conversations.ConfigureAwait(false);
+        RvmTrace($"init: conversations {initWatch.ElapsedMilliseconds}ms");
         await permissions.ConfigureAwait(false);
+        RvmTrace($"init: permissions {initWatch.ElapsedMilliseconds}ms");
 
         // 恢复的会话没有经过 OpenConversation：补上它的工作区，后续新建对话沿用同一目录
         lock (_gate)
@@ -40,37 +55,92 @@ public sealed partial class ChatSessionService
                 _sessionCwd = NormalizeCwd(
                     _conversations.FirstOrDefault(row => row.SessionId == _sessionId)?.Cwd);
         }
+        // 目录定下来之后再补一次：受保护工作区要在这里把会话盘挂上。
+        // 启动不等它——它会因绑定变化触发一次内核重启，那属于后台动作。
+        _ = WarmRvmSessionAsync();
     }
 
     public async Task RefreshConversationsAsync()
     {
-        await TryRefreshConversationsAsync().ConfigureAwait(false);
+        if (await TryRefreshConversationsAsync().ConfigureAwait(false)) return;
+        CompleteConversationLoad();
     }
 
     // 内核刚就绪时插件桥接可能仍在挂载：失败后短暂重试，列表不能因一次竞态一直空着
     private async Task RefreshConversationsWithRetryAsync()
     {
+        // 整体限时：单次桥接请求 15s 超时，5 次重试不能把加载态拖成一分多钟
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(12));
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            if (await TryRefreshConversationsAsync().ConfigureAwait(false)) return;
-            await Task.Delay(800).ConfigureAwait(false);
+            if (await TryRefreshConversationsAsync(deadline.Token).ConfigureAwait(false)) return;
+            if (deadline.IsCancellationRequested) break;
+            try
+            {
+                await Task.Delay(800, deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
+
+        // 重试耗尽也要结束加载态，否则侧栏会一直停在“正在加载会话”
+        CompleteConversationLoad();
     }
 
-    private async Task<bool> TryRefreshConversationsAsync()
+    private async Task<bool> TryRefreshConversationsAsync(CancellationToken cancellationToken = default)
     {
-        if (!_kernel.IsAvailable) return false;
-        var rows = await _kernel.ListSessionsAsync().ConfigureAwait(false);
+        if (!_kernel.IsAvailable)
+        {
+            if (!_conversationsLoaded) _conversationsError = DescribeConversationError();
+            return false;
+        }
+        IReadOnlyList<DshSessionRow>? rows;
+        try
+        {
+            rows = await _kernel.ListSessionsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_conversationsLoaded) _conversationsError = "Timed out reading the conversation list.";
+            return false;
+        }
         // 读取失败时保留已有列表，不用空结果覆盖
-        if (rows is null) return false;
+        if (rows is null)
+        {
+            if (!_conversationsLoaded) _conversationsError = DescribeConversationError();
+            return false;
+        }
         lock (_gate)
         {
             _conversations = rows;
             _conversationsLoaded = true;
         }
+        _conversationsError = null;
         SaveConversationsCache(rows);
         _messenger.Send(new ConversationsChangedMessage(rows));
         return true;
+    }
+
+    private void CompleteConversationLoad()
+    {
+        bool changed;
+        lock (_gate)
+        {
+            changed = !_conversationsLoaded;
+            _conversationsLoaded = true;
+        }
+        if (changed) _messenger.Send(new ConversationsChangedMessage(Conversations));
+    }
+
+    private string DescribeConversationError()
+    {
+        const string prefix = "Conversation list unavailable: ";
+        var status = _kernel.Status;
+        if (status.StartsWith(prefix, StringComparison.Ordinal))
+            status = status[prefix.Length..];
+        return string.IsNullOrWhiteSpace(status) ? "The DSH kernel is not available." : status;
     }
 
     private static IReadOnlyList<DshSessionRow> LoadConversationsCache()
@@ -103,17 +173,38 @@ public sealed partial class ChatSessionService
     public async Task OpenConversationAsync(string sessionId)
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return;
+        var alreadyCurrent = false;
         lock (_gate)
         {
             if (_kernelAssistantId is not null) return;
-            if (sessionId == _sessionId) return;
-            _sessionCwd = NormalizeCwd(
-                _conversations.FirstOrDefault(row => row.SessionId == sessionId)?.Cwd);
-            _newConversationCwd = false;
+            if (sessionId == _sessionId)
+            {
+                alreadyCurrent = true;
+            }
+            else
+            {
+                _sessionCwd = NormalizeCwd(
+                    _conversations.FirstOrDefault(row => row.SessionId == sessionId)?.Cwd);
+                _newConversationCwd = false;
+            }
         }
 
-        if (!await EnsureKernelAsync(null).ConfigureAwait(false)) return;
+        if (alreadyCurrent)
+        {
+            // 点的就是当前会话：内核可能早就起来了，但这不代表 RVM 会话建过。
+            // 预热在后台跑，打开会话不该等它（建会话盘可能要十几秒）。
+            _ = WarmRvmSessionAsync();
+            return;
+        }
+
+        // 同样不在打开路径上等 RVM：先用 defer 把内核与会话拉出来
+        var openWatch = System.Diagnostics.Stopwatch.StartNew();
+        RvmTrace($"open: begin session={sessionId} cwd={_sessionCwd}");
+        if (!await EnsureKernelAsync(null, deferRvm: true).ConfigureAwait(false)) return;
+        RvmTrace($"open: kernel ready {openWatch.ElapsedMilliseconds}ms");
         await ReloadSessionAsync(sessionId, resume: true).ConfigureAwait(false);
+        RvmTrace($"open: history rendered {openWatch.ElapsedMilliseconds}ms");
+        _ = WarmRvmSessionAsync();
     }
 
     public async Task<bool> DeleteConversationAsync(string sessionId)
@@ -126,6 +217,7 @@ public sealed partial class ChatSessionService
 
         var deleted = await _kernel.DeleteSessionAsync(sessionId).ConfigureAwait(false);
         if (!deleted) return false;
+        DeletePersistedChanges(sessionId);
 
         bool wasCurrent;
         string? cwd;
@@ -183,7 +275,9 @@ public sealed partial class ChatSessionService
         var historyTask = _kernel.ReadHistoryAsync(sessionId);
         var statsTask = _kernel.ReadStatsAsync(sessionId);
         var permissionTask = _kernel.GetPermissionAsync(sessionId);
+        var readWatch = System.Diagnostics.Stopwatch.StartNew();
         await Task.WhenAll(resumeTask, historyTask, statsTask, permissionTask).ConfigureAwait(false);
+        RvmTrace($"open: bridge reads done {readWatch.ElapsedMilliseconds}ms (resume={resume} alreadyOpen={alreadyOpen})");
         var history = await historyTask.ConfigureAwait(false);
         var stats = await statsTask.ConfigureAwait(false);
         var permission = await permissionTask.ConfigureAwait(false);
@@ -225,7 +319,13 @@ public sealed partial class ChatSessionService
             _messageVersion++;
             _messages.Clear();
             _messages.AddRange(restored);
+            // 打开会话时把这一轮轮改动读回来，别让历史卡片凭空消失
             _changes.Clear();
+            var restoredChanges = LoadPersistedChanges(sessionId);
+            _changes.AddRange(restoredChanges);
+            // 轮次编号从已恢复的记录继续，否则重启后第一轮又变成 turn 1（卡片和 diff 会对错）
+            _turnSeq = Math.Max(_turnSeq, restoredChanges.Count);
+            RvmTrace($"reload: restored {restoredChanges.Count} change row(s) for {sessionId}");
             _kernelAssistantId = null;
             _lastTurnAssistantId = null;
             _committedText = string.Empty;

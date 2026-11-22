@@ -12,7 +12,7 @@ Responsible 的沙箱执行环境。模型仍然调用 `pwsh`/`read`/`write` 等
 - AppContainer 子进程无法自行创建控制台；引擎自行持有一个隐藏控制台，否则子进程在加载器初始化阶段以 `STATUS_DLL_INIT_FAILED` 退出。
 - 子进程只继承 stdin/stdout/stderr 三个句柄（`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`），避免宿主管道/句柄泄漏进沙箱。
 - 工作区 ACL 授权失败不影响会话：宿主工作区本身不再授权给 AppContainer。会话盘（`<storage_key>\workspace`）授权后，启动会在沙箱内真实探测：写模式真实写入探针并核对宿主侧没有同名文件泄漏，只读模式枚举目录，以实际能力为准。
-- 每个工作区使用独立存储目录 `%LOCALAPPDATA%\Responsible\RVM\<storage_key>\`（Responsible 侧 key 为“工作区名前 24 字符_工作区 id 前 6 位”，CLI 为 `cli_<id>`）：`workspace\` 是会话盘，旁边常驻 `clone.ready`、`seed.manifest`、`baseline.manifest`、`system.json`、`system.log`、`sessions.log`、`audit.log`、`network.log`。会话关闭只卸载盘符，会话盘保留给同一工作区后续会话复用。
+- 每个工作区使用独立存储目录 `%LOCALAPPDATA%\Responsible\RVM\<storage_key>\`（Responsible 侧 key 为“工作区名前 24 字符_工作区 id 前 6 位”，CLI 为 `cli_<id>`）：`clone.ready`、`seed.manifest`、`baseline.manifest`、`system.json`、`system.log`、`sessions.log`、`audit.log`、`network.log` 常驻这里。会话盘本身放在同级共享目录 `volumes\<storage_key>\`，盘符（subst）挂到 `volumes` 根，因此沙箱里看到的是 `R:\<storage_key>\…`——多个工作区并存时按目录区分，切换会话不必换盘符。旧布局的 `<storage_key>\workspace` 会在下次开会话时自动搬到 `volumes\<storage_key>`。
 - 每个会话的临时目录固定在会话盘内 `.rvm_temp`（非叠加会话为工作区下的 `.rvm_temp`）；引擎把它设为子进程的 `TMP`/`TEMP`/`TMPDIR`，会话结束时清理，绝不回退到宿主 `%TEMP%`。
 - 祖先目录 traverse 授权逐级记录，会话/诊断结束按逆序撤销；会话盘、工具目录与串口 ACE 一并撤销。AppContainer profile 名带引擎 PID，避免与残留 profile 冲突。
 - Node 插件永不 spawn 宿主进程；所有命令由引擎转发到沙箱执行。

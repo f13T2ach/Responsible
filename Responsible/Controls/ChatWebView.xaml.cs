@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -47,6 +47,9 @@ public partial class ChatWebView : UserControl
             this, static (r, _) => ((ChatWebView)r).OnLanguageChanged());
     }
 
+    /// <summary>前端点了改动卡片或其中某个文件。</summary>
+    public event EventHandler<DiffRequest>? DiffRequested;
+
     public IChatSessionService? Session
     {
         get => (IChatSessionService?)GetValue(SessionProperty);
@@ -68,6 +71,7 @@ public partial class ChatWebView : UserControl
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        WebLog("loaded");
         _session ??= Session;
         if (_session is { } session) Subscribe(session);
         ApplicationThemeManager.Changed += OnThemeChanged;
@@ -151,6 +155,10 @@ public partial class ChatWebView : UserControl
                 break;
             case "openLink":
                 OpenExternal(msg.Href);
+                break;
+            case "showDiff":
+                // 对话区把“看这个文件的 diff”交给宿主：右侧是独立 WebView，不是覆盖层
+                DiffRequested?.Invoke(this, new DiffRequest(msg.Turn ?? 0, msg.Path, msg.Index));
                 break;
         }
     }
@@ -250,9 +258,12 @@ public partial class ChatWebView : UserControl
     // 切换持久化会话后整段重置：消息、统计与改动都来自新的 Session
     private void OnReloaded() => Ui(() =>
     {
+        WebLog("reloaded");
         if (_session is not { } session) return;
         Post(new HostHistoryReset(session.Messages.Select(ToWire).ToArray()));
         Post(new HostStats(ToWire(session.Stats)));
+        // 改动记录跟着历史一起重建，否则重启后“已编辑 n 个文件”会整片消失
+        Post(new HostChangesReset(session.Changes.Select(ToWire).ToArray()));
         RefreshFallback();
     });
 
@@ -326,8 +337,32 @@ public partial class ChatWebView : UserControl
 
     private void Post(object message)
     {
-        if (_fallback || Web.CoreWebView2 is null) return;
-        _ = Web.ExecuteScriptAsync(WebBridge.ScriptFor(message));
+        if (_fallback) { WebLog("post skipped: fallback"); return; }
+        if (Web.CoreWebView2 is null) { WebLog("post skipped: core null"); return; }
+        var script = WebBridge.ScriptFor(message);
+        _ = Web.ExecuteScriptAsync(script).ContinueWith(task =>
+        {
+            if (task.IsFaulted) WebLog($"post failed: {task.Exception?.GetBaseException().Message}");
+        }, TaskScheduler.Default);
+        if (message is HostChangesReset reset) WebLog($"post changes.reset rows={reset.Changes.Count}");
+    }
+
+    // 前端渲染问题的唯一可观测线索：把 Post 的结果写进日志
+    private static void WebLog(string line)
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Responsible", "logs");
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(
+                Path.Combine(directory, "webview.log"),
+                $"{DateTimeOffset.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private void ShowFallback()
@@ -380,7 +415,7 @@ public partial class ChatWebView : UserControl
         usage.ReasoningTokens,
         usage.Routes.Select(route => new WireUsageRoute(route.Provider, route.Model)).ToArray());
 
-    private static WireChanges ToWire(ChatChanges c) => new(
+    internal static WireChanges ToWire(ChatChanges c) => new(
         c.Turn,
         c.Cwd,
         c.Total,
@@ -392,7 +427,9 @@ public partial class ChatWebView : UserControl
             f.Added,
             f.Deleted,
             f.Binary ? true : null,
-            f.Oversized ? true : null)).ToArray());
+            f.Oversized ? true : null)).ToArray(),
+        // diff 文本一起推给前端：点开文件就能直接看，不必再回宿主取
+        c.Diffs.Count == 0 ? null : new Dictionary<string, string>(c.Diffs));
 
     private static WireStats ToWire(ChatStats s) =>
         new(s.Rounds, s.Steps, s.TokensPerSecond, s.TotalTokens, s.CacheHitRate, s.ContextPercent);

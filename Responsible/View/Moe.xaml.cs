@@ -1,6 +1,8 @@
 ﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using Responsible.Controls;
+using Responsible.Infrastructure;
 using Responsible.ViewModel;
 using Wpf.Ui.Controls;
 
@@ -15,6 +17,20 @@ namespace Responsible.View
         {
             InitializeComponent();
             HostTitleBar.WndProcInvoked += OnTitleBarWndProc;
+        }
+
+        // 对话区里点了“已编辑 n 个文件”或其中某个文件：展开右侧列并把这一轮的改动交给它。
+        // Path 为空表示看这一轮的第一个文件。
+        private void OnDiffRequested(object? sender, DiffRequest request)
+        {
+            if (DataContext is not MoeViewModel viewModel) return;
+            var changes = viewModel.Session.Changes
+                .FirstOrDefault(item => item.Turn == request.Turn);
+            if (changes is null) return;
+            viewModel.Changes.Load(changes);
+            viewModel.Changes.Selected = viewModel.Changes.Files
+                .FirstOrDefault(file => file.Path == request.Path) ?? viewModel.Changes.Selected;
+            viewModel.IsDiffOpen = true;
         }
 
         // 列表项自己消费 MouseDown 做选中，需要在这里接 Up 才能覆盖“重复点击当前对话”

@@ -148,11 +148,21 @@ struct CaptureState {
   std::string error;
   bool output_truncated = false;
   bool error_truncated = false;
+  // 子进程退出后管道写端可能仍被控制台宿主持有，ReadFile 会一直阻塞；
+  // 读线程靠这个标记在缓冲读空后自行退出，而不是等一次取消。
+  std::atomic<bool>* child_exited = nullptr;
 };
 
 void CaptureStream(HANDLE handle, bool is_error, CaptureState& state) {
   std::array<std::uint8_t, 16 * 1024> buffer{};
   for (;;) {
+    DWORD available = 0;
+    const BOOL peeked = PeekNamedPipe(handle, nullptr, 0, nullptr, &available, nullptr);
+    if (peeked && available == 0) {
+      if (state.child_exited != nullptr && state.child_exited->load()) break;
+      Sleep(5);
+      continue;
+    }
     DWORD read = 0;
     if (!ReadFile(handle, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr) ||
         read == 0) {
@@ -178,11 +188,20 @@ void CaptureStream(HANDLE handle, bool is_error, CaptureState& state) {
   }
 }
 
-void JoinCaptureThread(std::thread& thread) {
+// 子进程退出后仍可能留下继承的写端副本（控制台宿主、孙进程），读线程会一直阻塞在
+// ReadFile 上；关掉父侧读端能让它立刻返回，而不是每次会话都白等 5 秒。
+void JoinCaptureThread(std::thread& thread, HANDLE& read_handle) {
   if (!thread.joinable()) return;
   const HANDLE native = reinterpret_cast<HANDLE>(thread.native_handle());
-  if (WaitForSingleObject(native, 5000) == WAIT_TIMEOUT) {
+  if (WaitForSingleObject(native, 200) == WAIT_TIMEOUT) {
+    // 先关读端再取消挂起的 I/O：只关句柄并不保证 ReadFile 立刻返回，
+    // 子进程留下的继承写端会让这一步一直等到超时。
+    if (read_handle != nullptr) {
+      CloseHandle(read_handle);
+      read_handle = nullptr;
+    }
     CancelSynchronousIo(native);
+    WaitForSingleObject(native, 2000);
   }
   thread.join();
 }
@@ -720,6 +739,8 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
   CaptureState capture;
   capture.options = &options;
   capture.cap = options.max_output_bytes;
+  std::atomic<bool> child_exited{false};
+  capture.child_exited = &child_exited;
   std::thread stdout_thread(CaptureStream, handles.stdout_read, false, std::ref(capture));
   std::thread stderr_thread(CaptureStream, handles.stderr_read, true, std::ref(capture));
   std::thread stdin_thread([&handles, &options] {
@@ -759,9 +780,11 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
     break;
   }
 
-  JoinCaptureThread(stdout_thread);
-  JoinCaptureThread(stderr_thread);
-  JoinCaptureThread(stdin_thread);
+  // 进程已退出（或已被终止）：让读线程把缓冲读空后自己收工
+  child_exited.store(true);
+  JoinCaptureThread(stdout_thread, handles.stdout_read);
+  JoinCaptureThread(stderr_thread, handles.stderr_read);
+  JoinCaptureThread(stdin_thread, handles.stdin_write);
 
   DWORD exit_code = 1;
   GetExitCodeProcess(handles.process, &exit_code);

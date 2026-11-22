@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -12,6 +12,7 @@ using Responsible.MoeViews.Plugins;
 using Responsible.Services;
 using Responsible.View;
 using Responsible.ViewModel;
+using System.IO;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
 using TextBlock = System.Windows.Controls.TextBlock;
@@ -24,6 +25,8 @@ namespace Responsible
     {
         public IServiceProvider Services { get; private set; } = null!;
 
+        private CrashTray? _crashTray;
+
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
@@ -34,6 +37,11 @@ namespace Responsible
             Loc.Initialize();
 
             Services.GetRequiredService<IAppThemeService>();
+            // 提前实例化 RVM 服务：它会在构造时清掉上次崩溃遗留的 subst 盘符映射
+            Services.GetRequiredService<IRvmEngineService>();
+            _crashTray = CrashTray.Start(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Responsible"));
             var window = Services.GetRequiredService<MainWindow>();
             window.Show();
             Services.GetRequiredService<IAppThemeService>().Attach(window);
@@ -161,6 +169,7 @@ namespace Responsible
             services.AddSingleton<IContentDialogService, ContentDialogService>();
             services.AddSingleton<IProviderEditorService, ProviderEditorService>();
             services.AddSingleton<IWorkspaceEditorService, WorkspaceEditorService>();
+            services.AddSingleton<IWorkspacePreparation, WorkspacePreparation>();
 
             services.AddSingleton<MainWindow>();
             services.AddSingleton<MainWindowViewModel>();
@@ -178,7 +187,18 @@ namespace Responsible
 
         protected override void OnExit(ExitEventArgs e)
         {
+            // 引擎收尾可能因超时/强杀漏掉 subst 卸载，这里在容器释放前补一刀
+            try
+            {
+                if (Services.GetService(typeof(IRvmEngineService)) is IRvmEngineService rvm)
+                    rvm.CleanUpDriveMappings();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
             (Services as IDisposable)?.Dispose();
+            // 收尾都做完了再告别：RTray 收到告别就只记录、不再插手清理
+            _crashTray?.SayGoodbye();
             base.OnExit(e);
         }
     }

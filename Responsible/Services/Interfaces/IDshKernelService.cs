@@ -129,7 +129,7 @@ public interface IDshKernelService
     event Action<string, DshToolCallFrame>? ToolEvent;
 
     Task<bool> StartAsync(string provider, string model, string cwd, string? apiKey,
-        DshRvmBinding? rvm = null);
+        DshRvmBinding? rvm = null, string? rvmUnavailable = null);
     Task<bool> ResumeAsync(string sessionId);
     Task<string?> PromptAsync(string sessionId, string text);
     /// <summary>在指定轮次边界创建分支会话；成功返回子会话 id，失败返回 null 并写入 Status。</summary>

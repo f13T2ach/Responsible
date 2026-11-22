@@ -1,9 +1,10 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
 
     <!--  Common  -->
     <sys:String x:Key="L.Common.Cancel">取消</sys:String>
+    <sys:String x:Key="L.Common.Confirm">确定</sys:String>
     <sys:String x:Key="L.Common.Save">保存</sys:String>
     <sys:String x:Key="L.Common.Delete">删除</sys:String>
     <sys:String x:Key="L.Common.Close">关闭</sys:String>
@@ -38,6 +39,7 @@
     <sys:String x:Key="L.Moe.Sites">站点</sys:String>
     <sys:String x:Key="L.Moe.User">用户</sys:String>
     <sys:String x:Key="L.Moe.Workspaces">工作区</sys:String>
+    <sys:String x:Key="L.Moe.ConversationListError">会话列表加载失败：{0}</sys:String>
     <sys:String x:Key="L.Moe.NewWorkspace">新建工作区</sys:String>
     <sys:String x:Key="L.Moe.RvmProtected">RVM 隔离保护</sys:String>
     <sys:String x:Key="L.Moe.WorkspaceMenu">工作区菜单</sys:String>
@@ -75,6 +77,15 @@
     <sys:String x:Key="L.Moe.Permission.WorkspaceWriteDescription">可在当前工作区内读写文件，工作区外的修改会被拒绝</sys:String>
     <sys:String x:Key="L.Moe.Permission.FullAccessLabel">完全权限</sys:String>
     <sys:String x:Key="L.Moe.Permission.FullAccessDescription">不再询问，可自由访问你的文件、终端和网络</sys:String>
+    <sys:String x:Key="L.Moe.Permission.NotReadyTitle">审批强度暂不可改</sys:String>
+    <sys:String x:Key="L.Moe.Permission.NotReadyText">这个对话的运行时还没启动。先发一条消息让它起来，再切换审批强度。</sys:String>
+    <sys:String x:Key="L.Changes.Tab">第 {0} 轮改</sys:String>
+    <sys:String x:Key="L.Changes.Summary">本轮改动 {0} 个文件 · +{1} −{2}</sys:String>
+    <sys:String x:Key="L.Changes.OpenTip">查看本轮改了哪些文件、每个文件的具体差异</sys:String>
+    <sys:String x:Key="L.Changes.Close">关闭改动面板</sys:String>
+    <sys:String x:Key="L.Changes.Binary">二进制</sys:String>
+    <sys:String x:Key="L.Changes.NoTextDiff">这个文件没有可展示的文本差异（二进制文件只记状态）。</sys:String>
+    <sys:String x:Key="L.Moe.Permission.Pending">权限</sys:String>
     <sys:String x:Key="L.Moe.Permission.EnableRvmTitle">开启 RVM 隔离保护</sys:String>
     <sys:String x:Key="L.Moe.Permission.EnableRvmFailed">开启 RVM 隔离保护失败</sys:String>
     <sys:String x:Key="L.Moe.Permission.SwitchFailed">切换权限失败</sys:String>
@@ -173,6 +184,9 @@
     <sys:String x:Key="L.Rvm.AclHint2">继承授权只写在目录根上；之后安装或更新的工具文件无需重新授权。</sys:String>
 
     <!--  RVM settings dialog  -->
+    <sys:String x:Key="L.RvmSettings.IndexWarning">还没有设置 Git 索引。如果你不知道什么是 Git 索引、或者不需要，可以直接进行自动索引：它会把整个文件夹当成工作区完整索引一次。</sys:String>
+    <sys:String x:Key="L.RvmSettings.AutoIndex">自动索引</sys:String>
+    <sys:String x:Key="L.RvmSettings.AutoIndexBusy">正在索引，文件夹越大越久…</sys:String>
     <sys:String x:Key="L.RvmSettings.EnvDesc">沙箱默认只提供一套干净的环境变量。勾选需要额外提供给 AI 的变量（值在启动沙箱时读取，不写入磁盘）。勾选 PATH 时，宿主 PATH 中的绝对本地目录会追加到沙箱 PATH；相对路径、UNC 路径、工作区与临时目录会被忽略。</sys:String>
     <sys:String x:Key="L.RvmSettings.EnvVars">环境变量</sys:String>
     <sys:String x:Key="L.RvmSettings.Selected">已选 {0} 项</sys:String>
@@ -186,6 +200,26 @@
 
     <!--  Workspace editor  -->
     <sys:String x:Key="L.Workspace.New">新建工作区</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveConfirmTitle">移除工作区</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveConfirmText">将移除“{0}”及其 {1} 个对话。此操作不可撤销。</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveConfirmTextRvm">将移除“{0}”及其 {1} 个对话，并删除它的沙箱会话盘。此操作不可撤销。</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveUnsyncedTitle">工作区有未同步的修改</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveUnsyncedText">“{0}”在沙箱里还有 {1} 项改动没有同步回宿主工作区。移除会连同 {2} 个对话和它的沙箱会话盘一起删除。</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveSyncThenRemove">同步后移除</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveWithoutSync">直接移除</sys:String>
+    <sys:String x:Key="L.Rvm.OpenSettings">RVM 设置</sys:String>
+    <sys:String x:Key="L.Rvm.OpenSettingsTip">打开本工作区的 RVM 设置</sys:String>
+    <sys:String x:Key="L.Rvm.QuickSync">同步</sys:String>
+    <sys:String x:Key="L.Rvm.QuickSyncTip">把沙箱里的改动同步回宿主工作区</sys:String>
+    <sys:String x:Key="L.Rvm.QuickRollback">撤销</sys:String>
+    <sys:String x:Key="L.Rvm.QuickRollbackTip">丢弃沙箱里的改动，恢复会话盘</sys:String>
+    <sys:String x:Key="L.Rvm.RollbackConfirmTitle">撤销沙箱改动</sys:String>
+    <sys:String x:Key="L.Rvm.RollbackConfirmText">将撤销 AI 的所有工作并回退到本地相同状态，确定吗？</sys:String>
+    <sys:String x:Key="L.Rvm.SyncFailed">同步失败</sys:String>
+    <sys:String x:Key="L.Rvm.RollbackFailed">撤销失败</sys:String>
+    <sys:String x:Key="L.Workspace.Preparing">正在准备工作区</sys:String>
+    <sys:String x:Key="L.Workspace.PreparingDetail">正在为这个工作区建立隔离会话盘并复制受版本控制的文件，第一次可能需要一会儿，请稍等。</sys:String>
+    <sys:String x:Key="L.Workspace.PrepareFailed">工作区已创建，但隔离沙箱没有准备好</sys:String>
     <sys:String x:Key="L.Workspace.FallbackName">工作区</sys:String>
     <sys:String x:Key="L.Workspace.Location">文件所在位置</sys:String>
     <sys:String x:Key="L.Workspace.ThisPc">此电脑</sys:String>

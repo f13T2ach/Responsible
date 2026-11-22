@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace Responsible.Services;
 
@@ -380,7 +380,14 @@ public sealed partial class ChatSessionService
     {
         var changes = await _changeTracker.EndAsync().ConfigureAwait(false);
         if (changes is null || changes.Total == 0) return;
-        lock (_gate) _changes.Add(changes);
+        string sessionId;
+        lock (_gate)
+        {
+            _changes.Add(changes);
+            sessionId = _sessionId ?? string.Empty;
+        }
+        // 落盘：重启之后历史里的“已编辑 n 个文件”要还在
+        PersistChanges(sessionId, changes);
         ChangesReady?.Invoke(changes);
     }
 

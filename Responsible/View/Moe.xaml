@@ -225,6 +225,14 @@
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                Visibility="{Binding IsConversationsLoaded, Converter={StaticResource EqualityToVisibilityConverter}, ConverterParameter=!True}" />
 
+                    <TextBlock DockPanel.Dock="Top"
+                               Margin="16,6,16,2"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               Text="{Binding ConversationsErrorText}"
+                               Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                               Visibility="{Binding HasConversationsError, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl ItemsSource="{Binding Workspaces}">
                             <ItemsControl.ItemTemplate>
@@ -259,9 +267,13 @@
                                                                            Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
                                                         </Border>
                                                     </Grid>
-                                                    <TextBlock Text="{Binding Name}" Margin="8,0,0,0"
+                                                    <TextBlock Margin="8,0,0,0"
                                                                TextTrimming="CharacterEllipsis"
-                                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                                                        <Run Text="{Binding Name, Mode=OneWay}" />
+                                                        <Run Text="{Binding DirtyMark, Mode=OneWay}"
+                                                             Foreground="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                    </TextBlock>
                                                 </StackPanel>
 
                                                 <!--  行内操作：仅悬停或键盘聚焦时出现  -->
@@ -374,16 +386,21 @@
                     Style="{StaticResource MoeContentPanelStyle}"
                     Margin="8,6,10,8">
                 <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                 <!--  历史消息区：WebView2 承载 RWebView（运行时缺失时控件内降级）  -->
-                <controls:ChatWebView Grid.Row="0" Session="{Binding Session}" />
+                <controls:ChatWebView Grid.Row="0" Grid.Column="0" x:Name="HistoryView" Session="{Binding Session}" DiffRequested="OnDiffRequested" />
 
                 <!--  输入区  -->
                 <Border Grid.Row="1"
+                        Grid.Column="0"
                         x:Name="InputCard"
                         MaxWidth="920"
                         Margin="24,8,24,16"
@@ -437,7 +454,14 @@
                                                              CurrentIsDangerous="{Binding PermissionIsDangerous}"
                                                              CurrentIsRvmProtection="{Binding PermissionIsRvmProtection}"
                                                              SelectCommand="{Binding SelectPermissionCommand}"
-                                                             Visibility="{Binding IsPermissionAvailable, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                             IsEnabled="{Binding PermissionEnabled}" />
+                                <!--  受 RVM 保护时：本区设置 + 悬停同步/撤销  -->
+                                <controls:RvmWorkspaceControls Margin="6,0,0,0"
+                                                               VerticalAlignment="Center"
+                                                               OpenSettingsCommand="{Binding OpenWorkspaceRvmSettingsCommand}"
+                                                               SyncCommand="{Binding SyncRvmWorkspaceCommand}"
+                                                               RollbackCommand="{Binding RollbackRvmWorkspaceCommand}"
+                                                               Visibility="{Binding IsRvmControlsVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
                             </StackPanel>
                             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                                 <controls:ModelsDropMenu ItemsSource="{Binding ModelOptions}"
@@ -491,8 +515,178 @@
 
                 <!--  Moe 内容区页面：整块覆盖历史区与输入区（WebView2 已在打开期间折叠，规避空域）  -->
                 <controls:MoeViewHost Grid.RowSpan="2"
+                                      Grid.ColumnSpan="2"
                                       Panel.ZIndex="10"
                                       Background="{DynamicResource ApplicationBackgroundBrush}" />
+
+                <!--  本轮改动：独立的右侧 WebView（占一列），对话与输入框整体退让  -->
+                <Border Grid.Row="0"
+                        Grid.RowSpan="2"
+                        Grid.Column="1"
+                        Margin="8,0,0,0"
+                        CornerRadius="10"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        ClipToBounds="True">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="Width" Value="0" />
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsDiffOpen}" Value="True">
+                                    <Setter Property="Width" Value="470" />
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <!--  右侧改动面板：WPF 原生渲染（不走第二个 WebView2，避免 airspace 吞点击）  -->
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="38" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!--  tab 条：DSH 的 review 就是一个 tab（“第 N 轮改”）  -->
+                        <Grid Grid.Row="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Margin="6,4,0,0"
+                                    Padding="10,3"
+                                    CornerRadius="6,6,0,0"
+                                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1,1,1,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Changes.TabTitle}" FontSize="12" VerticalAlignment="Center" />
+                                    <ui:Button Margin="6,0,0,0"
+                                               Padding="2"
+                                               Icon="{ui:SymbolIcon Symbol=Dismiss24, FontSize=10}"
+                                               Command="{Binding ToggleChangesPanelCommand}" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!--  header：文件选择器 + 行数 + 工具（照 DSH 的 selector 与 tools）  -->
+                        <Grid Grid.Row="1" Height="38" Margin="8,0,6,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Command="{Binding Changes.ToggleFileMenuCommand}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="8,0"
+                                    Height="28"
+                                    HorizontalContentAlignment="Left">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="16" Height="16" CornerRadius="3"
+                                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                            Margin="0,0,6,0">
+                                        <TextBlock Text="{Binding Changes.Selected.Status}" FontSize="10"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Changes.Selected.Display}" FontSize="12"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
+                                    <ui:SymbolIcon Symbol="ChevronDown24" FontSize="10" Margin="4,0,0,0" />
+                                </StackPanel>
+                                <Button.ContextMenu>
+                                    <ContextMenu ItemsSource="{Binding Changes.Files}">
+                                        <ContextMenu.ItemContainerStyle>
+                                            <Style TargetType="MenuItem">
+                                                <Setter Property="Command" Value="{Binding DataContext.Changes.PickFileCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                                <Setter Property="CommandParameter" Value="{Binding}" />
+                                                <Setter Property="Header" Value="{Binding Display}" />
+                                            </Style>
+                                        </ContextMenu.ItemContainerStyle>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding Changes.SelectedCounts}"
+                                       FontFamily="Consolas, Cascadia Mono"
+                                       FontSize="11.5"
+                                       Margin="10,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                <ui:Button Padding="6" Icon="{ui:SymbolIcon Symbol=Dismiss24, FontSize=12}"
+                                           Command="{Binding ToggleChangesPanelCommand}"
+                                           ToolTip="{DynamicResource L.Changes.Close}" />
+                            </StackPanel>
+                        </Grid>
+                        <!--  diff：hunk 头 + 双行号行  -->
+                        <Grid Grid.Row="2">
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                          VerticalScrollBarVisibility="Auto"
+                                          Visibility="{Binding Changes.HasLines, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <ItemsControl ItemsSource="{Binding Changes.Lines}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:DiffLine}">
+                                            <Grid x:Name="Row" MinHeight="22">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="42" />
+                                                    <ColumnDefinition Width="16" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="Old" Grid.Column="0" Text="{Binding Old}"
+                                                           FontFamily="Consolas, Cascadia Mono" FontSize="11.5"
+                                                           TextAlignment="Right" Margin="0,0,8,0" />
+                                                <TextBlock x:Name="New" Grid.Column="1" Text="{Binding New}"
+                                                           FontFamily="Consolas, Cascadia Mono" FontSize="11.5"
+                                                           TextAlignment="Right" Margin="0,0,8,0" />
+                                                <TextBlock x:Name="Sign" Grid.Column="2" Text="{Binding Sign}"
+                                                           FontFamily="Consolas, Cascadia Mono" FontSize="11.5"
+                                                           TextAlignment="Center" />
+                                                <TextBlock x:Name="Body" Grid.Column="3" Text="{Binding Text}"
+                                                           FontFamily="Consolas, Cascadia Mono" FontSize="11.5"
+                                                           TextWrapping="NoWrap" Margin="0,0,12,0" />
+                                                <Grid.Style>
+                                                    <Style TargetType="Grid">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Kind}" Value="add">
+                                                                <Setter Property="Background" Value="#1A6CCB5F" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Kind}" Value="del">
+                                                                <Setter Property="Background" Value="#1AFF99A4" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Grid.Style>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <TextBlock Text="{Binding Changes.EmptyHint}"
+                                       Margin="18"
+                                       FontSize="12"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Changes.HasLines}" Value="False">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                    </Grid>
+                </Border>
                 </Grid>
             </Border>
         </Grid>

@@ -1,4 +1,4 @@
-namespace Responsible.Services;
+﻿namespace Responsible.Services;
 
 public sealed record RvmWorkspaceSession(ulong SessionId, string WorkspaceRoot, string VirtualRoot);
 
@@ -34,6 +34,8 @@ public sealed record RvmWorkspaceApplyResult(
 public interface IRvmEngineService : IDisposable
 {
     bool IsRunning { get; }
+    /// <summary>清掉指向 RVM 存储的遗留 subst 映射（退出兜底）。</summary>
+    void CleanUpDriveMappings();
     /// <summary>引擎可用（握手成功且可用性报告为真）；未启动或不可用时为 false。</summary>
     bool IsAvailable { get; }
     /// <summary>最近一次交互的状态文本（含失败原因），供界面与日志展示。</summary>
