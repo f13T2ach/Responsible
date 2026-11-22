@@ -23,6 +23,30 @@ constexpr std::size_t kMaxExposedEnvironmentChars = 64 * 1024;
 constexpr std::size_t kMaxToolPaths = 32;
 constexpr std::size_t kMaxAuthorizedTools = 64;
 constexpr wchar_t kCapabilityPrefix[] = L"S-1-15-3-";
+// Device exposure is limited to serial ports. A selected port must resolve to a
+// real device when the session starts; names are normalized to the Win32 path.
+constexpr std::size_t kMaxDevices = 16;
+
+std::wstring NormalizeDevicePath(const std::wstring& raw) {
+  std::wstring name = raw;
+  while (!name.empty() && (name.front() == L' ' || name.front() == L'\t')) name.erase(name.begin());
+  while (!name.empty() && (name.back() == L' ' || name.back() == L'\t')) name.pop_back();
+  if (name.rfind(L"\\\\.\\", 0) == 0) name = name.substr(4);
+  std::wstring upper;
+  upper.reserve(name.size());
+  for (wchar_t ch : name) {
+    if (ch >= L'a' && ch <= L'z') ch = static_cast<wchar_t>(ch - L'a' + L'A');
+    upper.push_back(ch);
+  }
+  if (upper.size() < 4 || upper.rfind(L"COM", 0) != 0) return {};
+  for (std::size_t i = 3; i < upper.size(); ++i) {
+    if (upper[i] < L'0' || upper[i] > L'9') return {};
+  }
+  if (upper.size() > 6) return {};
+  const int port = std::stoi(upper.substr(3));
+  if (port <= 0) return {};
+  return L"\\\\.\\" + upper;
+}
 
 std::uint64_t NowUnixMs() {
   return static_cast<std::uint64_t>(
@@ -154,15 +178,28 @@ core::Result<v1::Session> SessionManager::Create(const v1::CreateSessionRequest&
   spec.policy = policy.value();
   spec.memory_mb = request.memory_mb() == 0 ? kDefaultMemoryMb : request.memory_mb();
   spec.vcpu_count = request.vcpu_count() == 0 ? kDefaultVcpuCount : request.vcpu_count();
-  if (request.network_access()) {
-    return core::Error(core::ErrorCode::kNotImplemented,
-                       "network access is not supported by the sandbox backend");
-  }
   spec.overlay_workspace = request.overlay_workspace();
   if (request.overlay_workspace()) {
     auto drive = channel::FromUtf8(request.overlay_drive());
     if (!drive.ok()) return drive.error();
     spec.overlay_drive = drive.value();
+  }
+  if (static_cast<std::size_t>(request.device_paths_size()) > kMaxDevices) {
+    return core::Error(core::ErrorCode::kInvalidArgument, "too many exposed devices");
+  }
+  for (const std::string& raw : request.device_paths()) {
+    auto decoded = channel::FromUtf8(raw);
+    if (!decoded.ok()) return decoded.error();
+    const std::wstring normalized = NormalizeDevicePath(decoded.value());
+    if (normalized.empty()) {
+      return core::Error(core::ErrorCode::kInvalidArgument,
+                         "device paths must be COM port names", false, raw);
+    }
+    if (std::any_of(spec.devices.begin(), spec.devices.end(),
+                    [&](const std::wstring& existing) { return existing == normalized; })) {
+      return core::Error(core::ErrorCode::kInvalidArgument, "the same device was selected twice");
+    }
+    spec.devices.push_back(normalized);
   }
   spec.masked_patterns.reserve(static_cast<std::size_t>(request.masked_patterns_size()));
   for (const std::string& pattern : request.masked_patterns()) {
@@ -288,6 +325,14 @@ core::Result<v1::Session> SessionManager::Create(const v1::CreateSessionRequest&
   proto_facts->set_memory_mb(facts.value().memory_mb);
   proto_facts->set_vcpu_count(facts.value().vcpu_count);
   proto_facts->set_network_enabled(facts.value().network_enabled);
+  for (const std::wstring& device : facts.value().device_paths) {
+    auto encoded = channel::ToUtf8(device);
+    if (!encoded.ok()) {
+      environment.value()->Stop();
+      return encoded.error();
+    }
+    proto_facts->add_device_paths(encoded.value());
+  }
 
   sessions_.emplace(session_id, Entry{record, facts.value(), spec.workspace_root, environment.Take()});
   return record;
@@ -378,6 +423,10 @@ core::Result<ShellContext> SessionManager::DescribeForShell(std::uint64_t sessio
     return core::Error(core::ErrorCode::kInvalidState, "session is closed");
   }
   ShellContext context;
+  context.session_id = session_id;
+  context.archive_root = found->second.facts.archive_root;
+  context.network_enabled = found->second.facts.network_enabled;
+  context.network_capability_sid = found->second.facts.network_capability_sid;
   context.host_workspace_root = found->second.host_workspace_root;
   context.workspace_path = found->second.facts.workspace_path;
   context.appcontainer_sid = found->second.facts.appcontainer_sid;
@@ -387,6 +436,104 @@ core::Result<ShellContext> SessionManager::DescribeForShell(std::uint64_t sessio
   context.tool_paths = found->second.facts.tool_paths;
   context.tools = found->second.facts.tools;
   return context;
+}
+
+namespace {
+
+v1::ChangeKind ToProto(runtime::WorkspaceChangeKind kind) {
+  switch (kind) {
+    case runtime::WorkspaceChangeKind::kAdded:
+      return v1::CHANGE_KIND_ADDED;
+    case runtime::WorkspaceChangeKind::kModified:
+      return v1::CHANGE_KIND_MODIFIED;
+    case runtime::WorkspaceChangeKind::kDeleted:
+      return v1::CHANGE_KIND_DELETED;
+  }
+  return v1::CHANGE_KIND_UNSPECIFIED;
+}
+
+void FillFileChange(const runtime::WorkspaceChange& change, v1::FileChange* proto) {
+  auto path = channel::ToUtf8(change.path);
+  if (path.ok()) proto->set_path(path.value());
+  proto->set_kind(ToProto(change.kind));
+  proto->set_added_bytes(change.after_bytes);
+  proto->set_removed_bytes(change.before_bytes);
+}
+
+}  // namespace
+
+core::Result<v1::DiffResponse> SessionManager::DiffWorkspace(std::uint64_t session_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto found = sessions_.find(session_id);
+  if (found == sessions_.end()) {
+    return core::Error(core::ErrorCode::kSessionNotFound, "session does not exist");
+  }
+  if (found->second.environment == nullptr) {
+    return core::Error(core::ErrorCode::kInvalidState, "session is closed");
+  }
+  auto diff = found->second.environment->DiffWorkspace();
+  if (!diff.ok()) return diff.error();
+
+  v1::DiffResponse response;
+  response.set_truncated(diff.value().truncated);
+  for (const runtime::WorkspaceChange& change : diff.value().changes) {
+    FillFileChange(change, response.add_changes());
+    if (change.conflict) {
+      v1::SyncConflict* conflict = response.add_conflicts();
+      auto path = channel::ToUtf8(change.path);
+      if (path.ok()) conflict->set_path(path.value());
+      conflict->set_reason(change.conflict_reason.empty() ? "host changed after the snapshot"
+                                                          : change.conflict_reason);
+    }
+  }
+  return core::Ok(std::move(response));
+}
+
+core::Result<v1::ApplyResponse> SessionManager::ApplyWorkspace(
+    const v1::ApplyRequest& request) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto found = sessions_.find(request.session_id());
+  if (found == sessions_.end()) {
+    return core::Error(core::ErrorCode::kSessionNotFound, "session does not exist");
+  }
+  if (found->second.environment == nullptr) {
+    return core::Error(core::ErrorCode::kInvalidState, "session is closed");
+  }
+  std::vector<std::wstring> paths;
+  paths.reserve(static_cast<std::size_t>(request.paths_size()));
+  for (const std::string& path : request.paths()) {
+    auto decoded = channel::FromUtf8(path);
+    if (!decoded.ok()) return decoded.error();
+    paths.push_back(std::move(decoded.value()));
+  }
+  auto applied = found->second.environment->ApplyWorkspace(paths, request.all());
+  if (!applied.ok()) return applied.error();
+
+  v1::ApplyResponse response;
+  for (const runtime::WorkspaceChange& change : applied.value().applied) {
+    FillFileChange(change, response.add_applied());
+  }
+  for (const auto& [path, reason] : applied.value().conflicts) {
+    v1::SyncConflict* conflict = response.add_conflicts();
+    auto encoded = channel::ToUtf8(path);
+    if (encoded.ok()) conflict->set_path(encoded.value());
+    conflict->set_reason(reason);
+  }
+  return core::Ok(std::move(response));
+}
+
+core::Status SessionManager::RollbackWorkspace(std::uint64_t session_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto found = sessions_.find(session_id);
+  if (found == sessions_.end()) {
+    return core::Status::Failure(
+        core::Error(core::ErrorCode::kSessionNotFound, "session does not exist"));
+  }
+  if (found->second.environment == nullptr) {
+    return core::Status::Failure(
+        core::Error(core::ErrorCode::kInvalidState, "session is closed"));
+  }
+  return found->second.environment->RollbackWorkspace();
 }
 
 void SessionManager::Shutdown() {

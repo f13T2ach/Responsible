@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "channel/convert.h"
+#include "cli/rvm_cli.h"
 #include "client/shell_bridge.h"
 #include "core/engine.h"
 #include "core/log.h"
@@ -36,9 +37,15 @@ namespace {
 
 // AppContainer children cannot create a console of their own; their loader fails with
 // STATUS_DLL_INIT_FAILED unless an existing console can be inherited. Keep one hidden.
-void EnsureInheritableConsole() {
+// A daemon launched with CREATE_NO_WINDOW must not attach to the caller's console
+// (doing so would hide the user's terminal), so it allocates its own hidden one.
+void EnsureInheritableConsole(bool attach_parent) {
   if (GetConsoleCP() != 0) return;
-  if (!AttachConsole(ATTACH_PARENT_PROCESS) && !AllocConsole()) return;
+  if (attach_parent) {
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && !AllocConsole()) return;
+  } else if (!AllocConsole()) {
+    return;
+  }
   const HWND window = GetConsoleWindow();
   if (window != nullptr) ShowWindow(window, SW_HIDE);
 }
@@ -94,13 +101,19 @@ void PrintUsage() {
                "       RvmEngine --hcs-probe-system <config.json> [--start]\n"
                "       RvmEngine --sandbox-smoke <workspace>\n"
                "       RvmEngine --sandbox-exec <workspace> <command line>\n"
-               "       RvmEngine --sandbox-session <workspace> [--overlay-drive R:]\n"
+               "       RvmEngine --sandbox-session <workspace> [--overlay-drive R:] "
+               "[--storage-key <key>]\n"
                "       RvmEngine --sandbox-jailbreak <workspace> [--tool-path <dir>]... "
-               "[--python <path>]\n"
+               "[--python <path>] [--overlay-drive R:]\n"
                "       RvmEngine --shell-bridge --pipe <name> --session <id> "
-               "[--timeout-ms N] -- <argv...>\n"
+               "[--token <token>] [--timeout-ms N] -- <argv...>\n"
                "       RvmEngine --winfsp-probe [drive]\n"
-               "       RvmEngine --winfsp-smoke <workspace> [drive]\n"
+               "       RvmEngine --winfsp-smoke <workspace> [drive] [--appcontainer]\n"
+               "       RvmEngine --create-session <alias> <id> [<absolute_path>]\n"
+               "       RvmEngine --join <id>\n"
+               "       RvmEngine --terminate <id>\n"
+               "       RvmEngine --flushback <id>\n"
+               "       RvmEngine --save <id>\n"
                "       RvmEngine --version\n";
 }
 
@@ -146,7 +159,8 @@ std::wstring NormalizeDrive(const std::wstring& value) {
   return drive;
 }
 
-int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argument) {
+int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argument,
+                   bool use_appcontainer) {
   const std::wstring drive = NormalizeDrive(drive_argument.empty() ? L"R:" : drive_argument);
   if (drive.empty()) {
     std::cerr << "invalid drive letter: " << std::string(drive_argument.begin(), drive_argument.end())
@@ -210,6 +224,10 @@ int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argu
   std::cout << "restricted_sid=" << std::string(restricted_sid.begin(), restricted_sid.end())
             << '\n';
 
+  // AppContainer runs need the package SID on the mount device/root; the
+  // restricted-token path uses the synthetic session SID instead.
+  const std::wstring access_sid = use_appcontainer ? profile.value().sid : restricted_sid;
+
   rvm::workspace::UnionPaths union_paths;
   union_paths.base_root = base_root.wstring();
   union_paths.diff_root = diff_root.wstring();
@@ -225,7 +243,7 @@ int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argu
 
   rvm::workspace::MountOptions mount_options;
   mount_options.mount_point = drive;
-  mount_options.appcontainer_sid = restricted_sid;
+  mount_options.appcontainer_sid = access_sid;
   auto mounted = rvm::workspace::MountedWorkspace::Mount(&view, mount_options);
   if (!mounted.ok()) {
     PrintError(mounted.error());
@@ -243,8 +261,9 @@ int RunWinFspSmoke(const std::wstring& workspace, const std::wstring& drive_argu
                          new_drive_path + L" & del /f /q " + new_drive_path + L" & dir /b " +
                          drive + L"\\\"";
   options.working_directory = drive + L"\\";
-  options.appcontainer_sid = restricted_sid;
-  options.containment = rvm::sandbox::Containment::kRestrictedToken;
+  options.appcontainer_sid = access_sid;
+  options.containment = use_appcontainer ? rvm::sandbox::Containment::kAppContainer
+                                         : rvm::sandbox::Containment::kRestrictedToken;
   options.timeout_ms = 60000;
   options.memory_limit_bytes = 2ull * 1024 * 1024 * 1024;
   options.max_processes = 16;
@@ -426,7 +445,11 @@ bool ParseLogLevel(std::string_view value, rvm::core::LogLevel& level) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  EnsureInheritableConsole();
+  bool daemon_mode = false;
+  for (int i = 1; i < argc; ++i) {
+    if (std::string_view(argv[i]) == "--daemon") daemon_mode = true;
+  }
+  EnsureInheritableConsole(!daemon_mode);
 
   if (argc > 1 && std::string_view(argv[1]) == "--shell-bridge") {
     int wide_count = 0;
@@ -435,6 +458,19 @@ int main(int argc, char** argv) {
         wide != nullptr ? rvm::client::RunShellBridge(wide_count, wide) : 127;
     if (wide != nullptr) LocalFree(wide);
     return result;
+  }
+
+  if (argc > 1) {
+    int wide_count = 0;
+    wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &wide_count);
+    if (wide != nullptr) {
+      int result = -1;
+      if (wide_count > 1 && rvm::cli::IsCommand(wide[1])) {
+        result = rvm::cli::Run(wide_count, wide);
+      }
+      LocalFree(wide);
+      if (result >= 0) return result;
+    }
   }
 
   std::string pipe_name;
@@ -454,9 +490,11 @@ int main(int argc, char** argv) {
   std::vector<std::string> jailbreak_tool_paths;
   std::string jailbreak_python;
   bool winfsp_smoke = false;
+  bool winfsp_smoke_appcontainer = false;
   bool winfsp_probe = false;
   std::string winfsp_drive;
   std::string overlay_drive;
+  std::string storage_key;
   std::string sandbox_command;
   std::string probe_system_config;
   bool show_version = false;
@@ -466,6 +504,8 @@ int main(int argc, char** argv) {
     const std::string_view argument = argv[i];
     if (argument == "--version") {
       show_version = true;
+    } else if (argument == "--daemon") {
+      // Internal: the CLI re-execs the engine without a parent-console attach.
     } else if (argument == "--token-info") {
       token_info = true;
     } else if (argument == "--probe-availability") {
@@ -535,6 +575,12 @@ int main(int argc, char** argv) {
         return 64;
       }
       overlay_drive = argv[++i];
+    } else if (argument == "--storage-key") {
+      if (i + 1 >= argc) {
+        std::cerr << "--storage-key requires a value\n";
+        return 64;
+      }
+      storage_key = argv[++i];
     } else if (argument == "--winfsp-probe") {
       winfsp_probe = true;
       if (i + 1 < argc) {
@@ -559,6 +605,10 @@ int main(int argc, char** argv) {
             (next.size() == 2 && (next[0] | 0x20) >= 'a' && (next[0] | 0x20) <= 'z' &&
              next[1] == ':');
         if (looks_like_drive) winfsp_drive = argv[++i];
+      }
+      if (i + 1 < argc && std::string_view(argv[i + 1]) == "--appcontainer") {
+        winfsp_smoke_appcontainer = true;
+        ++i;
       }
     } else if (argument == "--sandbox-debug") {
       if (i + 2 >= argc) {
@@ -705,7 +755,8 @@ int main(int argc, char** argv) {
       std::cerr << "workspace and drive must be valid UTF-8\n";
       return 64;
     }
-    return RunWinFspSmoke(wide_workspace.value(), wide_drive.value());
+    return RunWinFspSmoke(wide_workspace.value(), wide_drive.value(),
+                          winfsp_smoke_appcontainer);
   }
 
   if (sandbox_debug) {
@@ -864,6 +915,14 @@ int main(int argc, char** argv) {
       }
       options.python_exe = wide_python.value();
     }
+    if (!overlay_drive.empty()) {
+      auto wide_drive = rvm::channel::FromUtf8(overlay_drive);
+      if (!wide_drive.ok()) {
+        std::cerr << "--overlay-drive must be valid UTF-8\n";
+        return 64;
+      }
+      options.overlay_drive = wide_drive.value();
+    }
     return rvm::server::RunJailbreakSmoke(options);
   }
 
@@ -892,6 +951,14 @@ int main(int argc, char** argv) {
       }
       spec.overlay_workspace = true;
       spec.overlay_drive = wide_drive.value();
+      if (!storage_key.empty()) {
+        auto wide_key = rvm::channel::FromUtf8(storage_key);
+        if (!wide_key.ok()) {
+          std::cerr << "--storage-key must be valid UTF-8\n";
+          return 64;
+        }
+        spec.storage_key = wide_key.value();
+      }
     }
 
     auto environment = backend->Create(spec);

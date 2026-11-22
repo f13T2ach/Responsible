@@ -9,6 +9,9 @@ struct JailbreakOptions {
   std::wstring workspace_root;
   std::vector<std::wstring> tool_paths;
   std::wstring python_exe;
+  // Non-empty runs the session on a mounted session disk instead of granting
+  // the host workspace, matching protected workspace sessions.
+  std::wstring overlay_drive;
 };
 
 // Starts a real sandbox session and runs bounded escape probes through the

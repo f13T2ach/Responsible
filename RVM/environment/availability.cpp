@@ -32,14 +32,12 @@ void AppendProblem(std::vector<std::string>& problems, const char* name,
 }  // namespace
 
 bool AvailabilityReport::rvm_available() const {
-  return appcontainer.ok() && vbs.ok() && hvci.ok();
+  return appcontainer.ok();
 }
 
 std::string AvailabilityReport::reason() const {
   std::vector<std::string> problems;
   AppendProblem(problems, "appcontainer", appcontainer);
-  AppendProblem(problems, "vbs", vbs);
-  AppendProblem(problems, "hvci", hvci);
 
   std::ostringstream stream;
   for (std::size_t i = 0; i < problems.size(); ++i) {

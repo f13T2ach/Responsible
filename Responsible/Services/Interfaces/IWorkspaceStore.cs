@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json.Serialization;
+using Responsible.Localization;
 
 namespace Responsible.Services;
 
@@ -46,16 +47,16 @@ public static class WorkspaceNames
     public static string? Validate(string? name)
     {
         var trimmed = (name ?? string.Empty).Trim();
-        if (trimmed.Length == 0) return "请输入工作区名称。";
-        if (trimmed.Length > MaxLength) return $"工作区名称最多 {MaxLength} 个字符。";
+        if (trimmed.Length == 0) return "Enter a workspace name.";
+        if (trimmed.Length > MaxLength) return $"A workspace name can contain at most {MaxLength} characters.";
         if (trimmed.StartsWith(ReservedPrefix, StringComparison.OrdinalIgnoreCase))
-            return "工作区名称不能以 .rvm_ 开头（保留给 RVM 内部目录）。";
-        if (trimmed.StartsWith('.')) return "工作区名称不能以 . 开头。";
+            return "A workspace name cannot start with .rvm_ (reserved for RVM internal directories).";
+        if (trimmed.StartsWith('.')) return "A workspace name cannot start with a dot.";
         if (trimmed.Any(ch => ch is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*'
                              || char.IsControl(ch)))
-            return "工作区名称不能包含 < > : \" / \\ | ? * 或控制字符。";
-        if (trimmed.EndsWith('.')) return "工作区名称不能以 . 结尾。";
-        if (IsDeviceName(trimmed)) return "工作区名称不能使用系统保留名（如 CON、NUL、COM1）。";
+            return "A workspace name cannot contain < > : \" / \\ | ? * or control characters.";
+        if (trimmed.EndsWith('.')) return "A workspace name cannot end with a dot.";
+        if (IsDeviceName(trimmed)) return "A workspace name cannot use a reserved system name such as CON, NUL, or COM1.";
         return null;
     }
 
@@ -76,10 +77,10 @@ public static class WorkspaceNames
 
     public static string DisplayNameFor(string directory)
     {
-        if (string.IsNullOrWhiteSpace(directory)) return "未指定工作区";
+        if (string.IsNullOrWhiteSpace(directory)) return Loc.T("L.Moe.UnnamedWorkspace");
         var trimmed = directory.TrimEnd('\\', '/');
         var name = Path.GetFileName(trimmed);
-        if (name == "default-workspace") return "默认工作区";
+        if (name == "default-workspace") return Loc.T("L.Moe.DefaultWorkspace");
         return string.IsNullOrEmpty(name) ? directory : name;
     }
 

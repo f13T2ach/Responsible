@@ -1,0 +1,353 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!--  Common  -->
+    <sys:String x:Key="L.Common.Cancel">取消</sys:String>
+    <sys:String x:Key="L.Common.Save">保存</sys:String>
+    <sys:String x:Key="L.Common.Delete">删除</sys:String>
+    <sys:String x:Key="L.Common.Close">关闭</sys:String>
+    <sys:String x:Key="L.Common.GotIt">知道了</sys:String>
+    <sys:String x:Key="L.Common.Continue">继续</sys:String>
+    <sys:String x:Key="L.Common.Back">返回</sys:String>
+    <sys:String x:Key="L.Common.Edit">编辑</sys:String>
+    <sys:String x:Key="L.Common.Remove">移除</sys:String>
+    <sys:String x:Key="L.Common.Loading">正在加载会话…</sys:String>
+    <sys:String x:Key="L.Common.Search">搜索</sys:String>
+    <sys:String x:Key="L.Common.Settings">设置</sys:String>
+    <sys:String x:Key="L.Common.Plugins">插件</sys:String>
+    <sys:String x:Key="L.Common.SelectWorkspaceFolder">选择工作区文件夹</sys:String>
+    <sys:String x:Key="L.Common.SelectToolFolder">选择要一次性授权给 RVM 的工具目录</sys:String>
+
+    <!--  Moe shell  -->
+    <sys:String x:Key="L.Moe.ToggleSidebar">收起 / 展开左边栏</sys:String>
+    <sys:String x:Key="L.Moe.MenuFile">文件</sys:String>
+    <sys:String x:Key="L.Moe.MenuEdit">编辑</sys:String>
+    <sys:String x:Key="L.Moe.MenuView">视图</sys:String>
+    <sys:String x:Key="L.Moe.MenuReview">审查</sys:String>
+    <sys:String x:Key="L.Moe.MenuHelp">帮助</sys:String>
+    <sys:String x:Key="L.Moe.NewChat">新建对话</sys:String>
+    <sys:String x:Key="L.Moe.OpenWorkspace">打开工作区</sys:String>
+    <sys:String x:Key="L.Moe.Sidebar">左边栏</sys:String>
+    <sys:String x:Key="L.Moe.StartReview">开始审查</sys:String>
+    <sys:String x:Key="L.Moe.Docs">文档</sys:String>
+    <sys:String x:Key="L.Moe.About">关于</sys:String>
+    <sys:String x:Key="L.Moe.SearchTip">搜索 (Ctrl+K)</sys:String>
+    <sys:String x:Key="L.Moe.Automation">自动化</sys:String>
+    <sys:String x:Key="L.Moe.Security">安全</sys:String>
+    <sys:String x:Key="L.Moe.Sites">站点</sys:String>
+    <sys:String x:Key="L.Moe.User">用户</sys:String>
+    <sys:String x:Key="L.Moe.Workspaces">工作区</sys:String>
+    <sys:String x:Key="L.Moe.NewWorkspace">新建工作区</sys:String>
+    <sys:String x:Key="L.Moe.RvmProtected">RVM 隔离保护</sys:String>
+    <sys:String x:Key="L.Moe.WorkspaceMenu">工作区菜单</sys:String>
+    <sys:String x:Key="L.Moe.OpenInExplorer">在资源管理器中打开</sys:String>
+    <sys:String x:Key="L.Moe.RvmSettings">RVM 设置</sys:String>
+    <sys:String x:Key="L.Moe.RemoveFromSidebar">从侧栏移除</sys:String>
+    <sys:String x:Key="L.Moe.NewChatInWorkspace">在此工作区新建对话</sys:String>
+    <sys:String x:Key="L.Moe.DeleteChat">删除对话</sys:String>
+    <sys:String x:Key="L.Moe.AddContent">添加内容</sys:String>
+    <sys:String x:Key="L.Moe.AddFile">添加文件</sys:String>
+    <sys:String x:Key="L.Moe.AddImage">添加图片</sys:String>
+    <sys:String x:Key="L.Moe.AddChat">添加对话</sys:String>
+    <sys:String x:Key="L.Moe.InvokeCommand">调用指令</sys:String>
+    <sys:String x:Key="L.Moe.SendTip">发送 (Enter)</sys:String>
+    <sys:String x:Key="L.Moe.PromptPlaceholder">发消息或创建任务，/ 调用指令，@ 文件或对话</sys:String>
+    <sys:String x:Key="L.Moe.RoundsSteps">{0} 轮 {1} 步</sys:String>
+    <sys:String x:Key="L.Moe.TokenUsage">{0} · 缓存命中 {1}</sys:String>
+    <sys:String x:Key="L.Moe.ContextUsage">{0}% 上下文</sys:String>
+    <sys:String x:Key="L.Moe.ContextTooltip">上下文容量占用</sys:String>
+    <sys:String x:Key="L.Moe.NewConversationTitle">新对话</sys:String>
+    <sys:String x:Key="L.Moe.DefaultWorkspace">默认工作区</sys:String>
+    <sys:String x:Key="L.Moe.UnnamedWorkspace">未指定工作区</sys:String>
+
+    <!--  Permission presets  -->
+    <sys:String x:Key="L.Moe.Permission.RvmLabel">RVM 隔离保护</sys:String>
+    <sys:String x:Key="L.Moe.Permission.RvmDescription">命令在独立会话盘上执行（工作区源码与配置按 git 索引选择性快照到本地 RVM 存储并挂载为盘符，之后只同步宿主变更），宿主工作区目录不授权给沙箱；临时文件写入会话盘内的专属 Temp。选择下方其它等级会关闭保护并恢复 DSH 沙箱。</sys:String>
+    <sys:String x:Key="L.Moe.Permission.SafeBadge">安全</sys:String>
+    <sys:String x:Key="L.Moe.Permission.AutoLabel">自动审查</sys:String>
+    <sys:String x:Key="L.Moe.Permission.AutoDescription">无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。</sys:String>
+    <sys:String x:Key="L.Moe.Permission.AutoConfirmDescription">自动审查不使用沙箱。每次原生工具调用和 PTC 内层调用前，都会由与当前 agent 相同的模型进行审查；审查拒绝的调用由你批准或拒绝。此功能仍属实验性，可能误放行或误拒绝，并会消耗额外 token。</sys:String>
+    <sys:String x:Key="L.Moe.Permission.FullAccessConfirmDescription">启用完全权限后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。</sys:String>
+    <sys:String x:Key="L.Moe.Permission.ReadOnlyLabel">仅可查看</sys:String>
+    <sys:String x:Key="L.Moe.Permission.ReadOnlyDescription">只能读取文件，写入与修改会被沙箱拒绝</sys:String>
+    <sys:String x:Key="L.Moe.Permission.WorkspaceWriteLabel">工作区内修改</sys:String>
+    <sys:String x:Key="L.Moe.Permission.WorkspaceWriteDescription">可在当前工作区内读写文件，工作区外的修改会被拒绝</sys:String>
+    <sys:String x:Key="L.Moe.Permission.FullAccessLabel">完全权限</sys:String>
+    <sys:String x:Key="L.Moe.Permission.FullAccessDescription">不再询问，可自由访问你的文件、终端和网络</sys:String>
+    <sys:String x:Key="L.Moe.Permission.EnableRvmTitle">开启 RVM 隔离保护</sys:String>
+    <sys:String x:Key="L.Moe.Permission.EnableRvmFailed">开启 RVM 隔离保护失败</sys:String>
+    <sys:String x:Key="L.Moe.Permission.SwitchFailed">切换权限失败</sys:String>
+    <sys:String x:Key="L.Moe.Permission.SaveRvmFailed">保存 RVM 设置失败</sys:String>
+    <sys:String x:Key="L.Moe.Permission.IsolatedTitle">AI 受到隔离</sys:String>
+    <sys:String x:Key="L.Moe.Permission.IsolatedText">AI 受到隔离，可能无法使用你安装在本机的工具，确定不额外提供吗？</sys:String>
+    <sys:String x:Key="L.Moe.Permission.EnableAnyway">仍然开启</sys:String>
+    <sys:String x:Key="L.Moe.Permission.AcknowledgeAuto">我已了解这些风险，并愿意继续</sys:String>
+    <sys:String x:Key="L.Moe.Permission.AcknowledgeFull">我已了解风险，并愿意继续</sys:String>
+    <sys:String x:Key="L.Moe.Permission.ConfirmAutoTitle">确认启用自动审查（实验）？</sys:String>
+    <sys:String x:Key="L.Moe.Permission.ConfirmFullTitle">确认启用完全权限？</sys:String>
+    <sys:String x:Key="L.Moe.Permission.EnableAuto">启用自动审查</sys:String>
+    <sys:String x:Key="L.Moe.Permission.EnableFull">启用完全权限</sys:String>
+    <sys:String x:Key="L.Moe.DeleteChatTitle">删除对话</sys:String>
+    <sys:String x:Key="L.Moe.DeleteChatText">确定删除「{0}」吗？本地的对话记录会一并删除，且无法恢复。</sys:String>
+    <sys:String x:Key="L.Moe.DeleteFailedTitle">删除失败</sys:String>
+    <sys:String x:Key="L.Moe.DeleteFailedText">会话文件未能删除，请稍后重试。</sys:String>
+
+    <!--  Model picker  -->
+    <sys:String x:Key="L.Models.Provider">模型供应商</sys:String>
+    <sys:String x:Key="L.Models.Select">选择模型</sys:String>
+    <sys:String x:Key="L.Models.Search">搜索模型...</sys:String>
+    <sys:String x:Key="L.Models.NoMatch">无匹配模型</sys:String>
+    <sys:String x:Key="L.Chat.Empty">发起对话</sys:String>
+
+    <!--  Settings shell  -->
+    <sys:String x:Key="L.Settings.Title">设置</sys:String>
+    <sys:String x:Key="L.Settings.OpenConfig">打开配置文件</sys:String>
+    <sys:String x:Key="L.Settings.Close">关闭设置</sys:String>
+    <sys:String x:Key="L.Settings.ComingSoon">「{0}」即将开放</sys:String>
+    <sys:String x:Key="L.SettingsNav.Rvm">RVM 实现</sys:String>
+    <sys:String x:Key="L.SettingsNav.General">通用设置</sys:String>
+    <sys:String x:Key="L.SettingsNav.Models">模型</sys:String>
+    <sys:String x:Key="L.SettingsNav.Plugins">内置插件</sys:String>
+    <sys:String x:Key="L.SettingsNav.Presets">Agent 预设</sys:String>
+
+    <!--  General  -->
+    <sys:String x:Key="L.General.Title">通用设置</sys:String>
+    <sys:String x:Key="L.General.Subtitle">窗口与内嵌 Web 内容共用同一套主题资源。</sys:String>
+    <sys:String x:Key="L.General.Appearance">外观</sys:String>
+    <sys:String x:Key="L.General.AppearanceDesc">主题模式立即作用于标题栏、侧栏、内容区与历史消息页。</sys:String>
+    <sys:String x:Key="L.General.System">跟随系统</sys:String>
+    <sys:String x:Key="L.General.SystemDesc">随 Windows 外观切换</sys:String>
+    <sys:String x:Key="L.General.Light">浅色</sys:String>
+    <sys:String x:Key="L.General.LightDesc">浅色填充，Web 同浅色背景</sys:String>
+    <sys:String x:Key="L.General.Dark">深色</sys:String>
+    <sys:String x:Key="L.General.DarkDesc">深色填充，Web 同深色背景</sys:String>
+    <sys:String x:Key="L.General.Language">语言</sys:String>
+    <sys:String x:Key="L.General.LanguageDesc">界面文字（含内嵌会话历史）会立即切换；错误信息始终为英文。</sys:String>
+
+    <!--  Models tab  -->
+    <sys:String x:Key="L.ModelsTab.Title">模型</sys:String>
+    <sys:String x:Key="L.ModelsTab.Subtitle">填入各提供商的 API 密钥即可使用其模型。</sys:String>
+    <sys:String x:Key="L.ModelsTab.Edit">编辑</sys:String>
+    <sys:String x:Key="L.ModelsTab.Delete">删除</sys:String>
+    <sys:String x:Key="L.ModelsTab.Custom">自定义</sys:String>
+    <sys:String x:Key="L.ModelsTab.SignedIn">已登录</sys:String>
+    <sys:String x:Key="L.ModelsTab.Add">添加模型提供商</sys:String>
+
+    <!--  RVM tab  -->
+    <sys:String x:Key="L.Rvm.Title">RVM 实现</sys:String>
+    <sys:String x:Key="L.Rvm.Subtitle">沙箱依赖的宿主组件与授权，都集中在这里管理。</sys:String>
+    <sys:String x:Key="L.Rvm.SessionDiskTitle">会话盘与 WinFsp</sys:String>
+    <sys:String x:Key="L.Rvm.SessionDiskDesc">受保护会话运行在本地 RVM 存储中的会话盘上：工作区源码与配置按 git 索引选择性快照到该盘（依赖目录、构建产物与缓存不复制），之后每次启动只同步宿主侧的变更，沙箱内的修改保留在快照里。沙箱只授权这块会话盘，真实工作区目录始终不向沙箱开放。WinFsp 2.2 的卷设备不允许 AppContainer 打开（winfsp/winfsp#705），会话盘改由系统盘符映射提供，WinFsp 仅保留安装检测。</sys:String>
+    <sys:String x:Key="L.Rvm.Status">状态：</sys:String>
+    <sys:String x:Key="L.Rvm.WinFspDiag">检测结果只用于诊断；会话盘不依赖 WinFsp，也不会因未安装而退回 DSH 沙箱。</sys:String>
+    <sys:String x:Key="L.Rvm.WinFspInstalling">正在安装 WinFsp，请在系统提示中确认管理员权限…</sys:String>
+    <sys:String x:Key="L.Rvm.RecheckWinFsp">重新检测 WinFsp</sys:String>
+    <sys:String x:Key="L.Rvm.DriveLabel">虚拟盘符</sys:String>
+    <sys:String x:Key="L.Rvm.DriveHint">会话盘的首选盘符；被占用时引擎会自动换用其他空闲盘符。</sys:String>
+    <sys:String x:Key="L.Rvm.PenetrationTitle">网络与设备穿透</sys:String>
+    <sys:String x:Key="L.Rvm.PenetrationDesc">穿透策略在会话创建时固化为 AppContainer 能力与设备 ACL。端口遮罩是固定语义：宿主 loopback 端口与会话入站端口互不可见；开启网络只放行出站连接，不会解除遮罩。网络审计按命令进程树采样宿主 TCP/UDP 表，把新观察到的出站端点写入会话档案 network.log。</sys:String>
+    <sys:String x:Key="L.Rvm.Network">网络穿透</sys:String>
+    <sys:String x:Key="L.Rvm.NetworkDesc">默认关闭：会话没有任何网络能力。开启后只授予 internetClient 出站能力；不授予 loopback 豁免与入站能力，因此宿主服务端口保持遮罩。</sys:String>
+    <sys:String x:Key="L.Rvm.Devices">设备穿透</sys:String>
+    <sys:String x:Key="L.Rvm.DevicesDesc">只暴露勾选的串口。引擎为会话身份在设备安全描述符上添加一条读写 ACE，停止会话时撤销；设备无法打开或授权失败会让会话启动失败，而不是伪装成已暴露。</sys:String>
+    <sys:String x:Key="L.Rvm.SerialPorts">可用串口</sys:String>
+    <sys:String x:Key="L.Rvm.EnumPorts">重新枚举串口</sys:String>
+    <sys:String x:Key="L.Rvm.NoSerial">未检测到串口。</sys:String>
+    <sys:String x:Key="L.Rvm.PolicyPath">策略保存在 %APPDATA%\Responsible\rvm-policy.json；修改后在下一次启动受保护会话时生效。</sys:String>
+    <sys:String x:Key="L.Rvm.ArchiveTitle">会话档案</sys:String>
+    <sys:String x:Key="L.Rvm.ArchiveDesc">会话盘的差异以本地快照档案为基线：启动时记录宿主清理副本与系统元数据（OS 版本、VBS/HVCI 状态、AppContainer 身份、授权、环境变量名、工具目录），之后只遍历会话盘，不扫描宿主目录。审计确认后再同步或回滚；同步只写回未冲突项，回滚只恢复会话盘，宿主文件不动。</sys:String>
+    <sys:String x:Key="L.Rvm.RecheckSession">重新读取会话状态</sys:String>
+    <sys:String x:Key="L.Rvm.ArchiveBusy">正在读取或写入会话档案…</sys:String>
+    <sys:String x:Key="L.Rvm.Audit">审计变更</sys:String>
+    <sys:String x:Key="L.Rvm.Sync">同步到本地</sys:String>
+    <sys:String x:Key="L.Rvm.Rollback">回滚会话盘</sys:String>
+    <sys:String x:Key="L.Rvm.ArchiveEmpty">会话盘与基线一致，没有待处理的改动。</sys:String>
+    <sys:String x:Key="L.Rvm.ArchivePathHint">快照档案保存在本机 %LOCALAPPDATA%\Responsible\RVM\&lt;存储键&gt;\：seed.manifest、baseline.manifest、system.json、system.log、audit.log；宿主工作区的只读访问不会写入这些文件。</sys:String>
+    <sys:String x:Key="L.Rvm.AclTitle">ACL 授权管理</sys:String>
+    <sys:String x:Key="L.Rvm.AclDesc">一次性把工具目录的读取/执行权限授予 RVM 的固定身份。授权只在目录根写入一条可继承的 ACE，目录树里现有和以后新增的文件都会自动生效，不改动文件原有的权限配置。</sys:String>
+    <sys:String x:Key="L.Rvm.AddTool">添加工具目录</sys:String>
+    <sys:String x:Key="L.Rvm.NoTools">还没有授权任何工具目录。先在下面添加，再到工作区设置中勾选本次会话允许使用的工具。</sys:String>
+    <sys:String x:Key="L.Rvm.RemoveGrant">移除授权</sys:String>
+    <sys:String x:Key="L.Rvm.AclHint1">每次启动都会重新校验授权；失效项以删除线标出，可点右侧刷新图标重新授权或直接移除。</sys:String>
+    <sys:String x:Key="L.Rvm.AclHint2">继承授权只写在目录根上；之后安装或更新的工具文件无需重新授权。</sys:String>
+
+    <!--  RVM settings dialog  -->
+    <sys:String x:Key="L.RvmSettings.EnvDesc">沙箱默认只提供一套干净的环境变量。勾选需要额外提供给 AI 的变量（值在启动沙箱时读取，不写入磁盘）。勾选 PATH 时，宿主 PATH 中的绝对本地目录会追加到沙箱 PATH；相对路径、UNC 路径、工作区与临时目录会被忽略。</sys:String>
+    <sys:String x:Key="L.RvmSettings.EnvVars">环境变量</sys:String>
+    <sys:String x:Key="L.RvmSettings.Selected">已选 {0} 项</sys:String>
+    <sys:String x:Key="L.RvmSettings.Filter">筛选环境变量…</sys:String>
+    <sys:String x:Key="L.RvmSettings.Tools">工具目录</sys:String>
+    <sys:String x:Key="L.RvmSettings.ToolsDesc">工具目录来自“设置 → RVM 实现 → ACL 授权管理”。这里只决定本次会话允许使用哪些已授权工具；未勾选的工具不会进入沙箱 PATH，也不携带访问权限。</sys:String>
+    <sys:String x:Key="L.RvmSettings.NoTools">还没有全局授权的工具目录，请先到“设置 → RVM 实现”添加。</sys:String>
+    <sys:String x:Key="L.RvmSettings.PathOverride">PATH（追加宿主 PATH 中的可访问目录）</sys:String>
+    <sys:String x:Key="L.RvmSettings.Missing">{0}（当前不存在）</sys:String>
+    <sys:String x:Key="L.RvmSettings.Unauthorized">{0}（未授权）</sys:String>
+
+    <!--  Workspace editor  -->
+    <sys:String x:Key="L.Workspace.New">新建工作区</sys:String>
+    <sys:String x:Key="L.Workspace.FallbackName">工作区</sys:String>
+    <sys:String x:Key="L.Workspace.Location">文件所在位置</sys:String>
+    <sys:String x:Key="L.Workspace.ThisPc">此电脑</sys:String>
+    <sys:String x:Key="L.Workspace.SourceFolders">源文件夹</sys:String>
+    <sys:String x:Key="L.Workspace.AddFolderHint">点击添加可读写文件夹</sys:String>
+    <sys:String x:Key="L.Workspace.PickFolder">选择文件夹，也可以直接把文件夹拖到这里</sys:String>
+    <sys:String x:Key="L.Workspace.RemoveFolder">移除文件夹</sys:String>
+    <sys:String x:Key="L.Workspace.Name">工作区名称</sys:String>
+    <sys:String x:Key="L.Workspace.NamePlaceholder">输入名称…</sys:String>
+    <sys:String x:Key="L.Workspace.RvmProtection">RVM 隔离保护</sys:String>
+    <sys:String x:Key="L.Workspace.RvmDescription">命令在独立会话盘上执行：工作区源码与配置按 git 索引选择性快照到本地 RVM 存储并挂载为盘符（不复制依赖目录与构建产物），之后只同步宿主变更，真实工作区目录不授权给沙箱，临时文件写入会话盘内的专属 Temp。未勾选时使用 DSH 自带沙箱。</sys:String>
+    <sys:String x:Key="L.Workspace.GitSnapshot">Git 索引快照</sys:String>
+    <sys:String x:Key="L.Workspace.FullIndex">全面索引（推荐办公）</sys:String>
+    <sys:String x:Key="L.Workspace.FullIndexTip">索引整个工作区（包括被 .gitignore 忽略的文件），适合没有代码的办公目录</sys:String>
+    <sys:String x:Key="L.Workspace.NormalIndex">普通索引</sys:String>
+    <sys:String x:Key="L.Workspace.NormalIndexTip">按 .gitignore 建立索引，适合代码仓库</sys:String>
+    <sys:String x:Key="L.Workspace.RvmSettings">RVM 设置 · 环境变量与工具</sys:String>
+    <sys:String x:Key="L.Workspace.IsolatedWarning">AI 受到隔离，可能无法使用你安装在本机的工具，确定不额外提供吗？</sys:String>
+    <sys:String x:Key="L.Workspace.BackToSettings">返回设置</sys:String>
+    <sys:String x:Key="L.Workspace.CreateAnyway">仍然创建</sys:String>
+    <sys:String x:Key="L.Workspace.Create">创建</sys:String>
+
+    <!--  Provider editor  -->
+    <sys:String x:Key="L.Provider.TabCatalog">第三方模型提供商</sys:String>
+    <sys:String x:Key="L.Provider.CatalogDesc">从内置目录中选择 OpenAI、Anthropic、Kimi 等提供商，填入其 API 密钥即可使用。</sys:String>
+    <sys:String x:Key="L.Provider.Provider">提供商</sys:String>
+    <sys:String x:Key="L.Provider.ApiKey">API 密钥</sys:String>
+    <sys:String x:Key="L.Provider.ApiKeyTip">留空时使用环境变量中的凭据</sys:String>
+    <sys:String x:Key="L.Provider.CustomSettings">自定义设置</sys:String>
+    <sys:String x:Key="L.Provider.BaseUrl">API 地址</sys:String>
+    <sys:String x:Key="L.Provider.BaseUrlPlaceholder">由提供方配置地址</sys:String>
+    <sys:String x:Key="L.Provider.TabCustom">自定义模型 API</sys:String>
+    <sys:String x:Key="L.Provider.CustomDesc">连接中转站、自部署服务或其他兼容 OpenAI / Anthropic 协议的接口，需填写 API 地址、协议和模型。</sys:String>
+    <sys:String x:Key="L.Provider.ProviderIdHint">以小写字母开头的标识，在请求中唯一标识该提供商，并用于派生凭据名。</sys:String>
+    <sys:String x:Key="L.Provider.DisplayName">显示名称</sys:String>
+    <sys:String x:Key="L.Provider.DisplayNamePlaceholder">显示名称</sys:String>
+    <sys:String x:Key="L.Provider.Protocol">API 协议</sys:String>
+    <sys:String x:Key="L.Provider.ApiKeyPlaceholder">输入 API 密钥</sys:String>
+    <sys:String x:Key="L.Provider.FetchModels">获取可用模型</sys:String>
+    <sys:String x:Key="L.Provider.Catalog">模型目录</sys:String>
+    <sys:String x:Key="L.Provider.RemoveModel">移除模型</sys:String>
+    <sys:String x:Key="L.Provider.EmptyModels">模型选择器中将不显示任何模型；目录外 ID 仍可直接发送。</sys:String>
+    <sys:String x:Key="L.Provider.AddModel">添加模型</sys:String>
+    <sys:String x:Key="L.Provider.DefaultModels">正在使用适配器默认模型</sys:String>
+    <sys:String x:Key="L.Provider.NoModels">未获取到模型；可手动添加。</sys:String>
+    <sys:String x:Key="L.Provider.EnvPlaceholder">留空使用环境认证（{0}）</sys:String>
+    <sys:String x:Key="L.Provider.EnvWarning">未检测到环境变量。请填写 API 密钥，或设置环境变量 {0}。</sys:String>
+    <sys:String x:Key="L.Provider.RegionsHint">提供方地址配置：{0}</sys:String>
+
+    <!--  Plugins  -->
+    <sys:String x:Key="L.Plugins.Title">插件</sys:String>
+    <sys:String x:Key="L.Plugins.Subtitle">管理 DSH 内核插件；启用或停用会在重启内核后生效。</sys:String>
+    <sys:String x:Key="L.Plugins.Back">返回对话</sys:String>
+    <sys:String x:Key="L.Plugins.Restart">重启内核</sys:String>
+    <sys:String x:Key="L.Plugins.Refresh">刷新插件列表</sys:String>
+    <sys:String x:Key="L.Plugins.Search">搜索插件名称或模块</sys:String>
+    <sys:String x:Key="L.Plugins.Locked">受宿主保护，无法停用</sys:String>
+    <sys:String x:Key="L.Plugins.User">用户插件</sys:String>
+    <sys:String x:Key="L.Plugins.UserSource">来自 RDshPlugins 或第三方包</sys:String>
+    <sys:String x:Key="L.Plugins.BuiltIn">DSH 内置</sys:String>
+    <sys:String x:Key="L.Plugins.BuiltInSource">随 DSH 内核发布</sys:String>
+    <sys:String x:Key="L.Plugins.Empty">没有找到插件</sys:String>
+    <sys:String x:Key="L.Plugins.EmptyHint">插件来自 DSH 内置包与 RDshPlugins 目录；启动内核后可读取实时状态。</sys:String>
+    <sys:String x:Key="L.Plugins.Loading">正在读取插件…</sys:String>
+    <sys:String x:Key="L.Plugins.Pending">有 {0} 项更改等待重启内核后生效</sys:String>
+    <sys:String x:Key="L.Plugins.PendingBadge">待重启</sys:String>
+    <sys:String x:Key="L.Plugins.StatusActive">运行中</sys:String>
+    <sys:String x:Key="L.Plugins.StatusFailed">加载失败</sys:String>
+    <sys:String x:Key="L.Plugins.StatusOff">已停用</sys:String>
+    <sys:String x:Key="L.Plugins.Saved">已保存，{0} 项更改将在重启内核后生效</sys:String>
+    <sys:String x:Key="L.Plugins.SavedSimple">插件状态已更新</sys:String>
+    <sys:String x:Key="L.Plugins.KernelRestarted">内核已重启，插件更改已生效。</sys:String>
+    <sys:String x:Key="L.Plugins.HostRequired">Responsible 宿主必需，无法停用。</sys:String>
+    <sys:String x:Key="L.Plugins.DshRequired">DSH 运行必需，无法停用。</sys:String>
+    <sys:String x:Key="L.Plugins.NotPatchManaged">该插件不由 DSH patch 管理，无法在此停用。</sys:String>
+    <sys:String x:Key="L.Plugins.HostName">Responsible 宿主集成</sys:String>
+    <sys:String x:Key="L.Plugins.HostDesc">向 DSH 注入 Responsible 的人设与插件桥接。</sys:String>
+    <sys:String x:Key="L.Plugins.KernelRunning">内核运行中 · {0} 个插件</sys:String>
+    <sys:String x:Key="L.Plugins.KernelStopped">内核未启动</sys:String>
+    <sys:String x:Key="L.Plugins.KernelNoResponse">内核未响应</sys:String>
+    <sys:String x:Key="L.Plugins.CacheAge">上次读取 {0}</sys:String>
+    <sys:String x:Key="L.Plugins.NoCache">内核未启动 · 暂无插件缓存</sys:String>
+
+    <!--  Startup & session status  -->
+    <sys:String x:Key="L.Startup.Title">启动检查</sys:String>
+    <sys:String x:Key="L.Startup.FailedTitle">启动检查失效</sys:String>
+    <sys:String x:Key="L.Startup.Summary">启动检查发现 {0} 项失效，相关功能可能无法使用：</sys:String>
+    <sys:String x:Key="L.Session.RvmMounted">会话盘已挂载于 {0}</sys:String>
+    <sys:String x:Key="L.Session.RvmNotMounted">当前对话尚未挂载 RVM 会话盘；先在受保护工作区中发起对话。</sys:String>
+    <sys:String x:Key="L.Session.NoRvm">当前对话尚未挂载 RVM 会话盘。</sys:String>
+    <sys:String x:Key="L.Session.ArchiveBusy">正在处理上一次会话档案操作，请稍候。</sys:String>
+    <sys:String x:Key="L.Session.SyncConfirmTitle">同步到本地工作区</sys:String>
+    <sys:String x:Key="L.Session.SyncConfirmText">会话盘中未冲突的改动会写回宿主工作区，冲突项跳过并保留宿主版本。同步后这些改动不再出现在差异列表中。</sys:String>
+    <sys:String x:Key="L.Session.RollbackConfirmTitle">回滚会话盘</sys:String>
+    <sys:String x:Key="L.Session.RollbackConfirmText">会话盘会丢弃全部未同步改动，并按宿主工作区的当前内容恢复。此操作不会修改宿主文件，但沙箱内的改动将无法找回。</sys:String>
+    <sys:String x:Key="L.Session.SyncDone">已同步 {0} 项改动到本地工作区。</sys:String>
+    <sys:String x:Key="L.Session.SyncDoneConflicts">已同步 {0} 项改动；{1} 处冲突已跳过，宿主版本保持不变。</sys:String>
+    <sys:String x:Key="L.Session.RollbackDone">会话盘已按宿主工作区恢复，未同步改动已丢弃。</sys:String>
+    <sys:String x:Key="L.Session.DiffEmpty">会话盘与基线一致，没有待处理的改动。</sys:String>
+    <sys:String x:Key="L.Session.DiffSummary">{0} 项改动，{1} 处冲突（冲突项不会被同步）。</sys:String>
+    <sys:String x:Key="L.Session.DiffTruncated">{0} 列表已截断，仅显示前一部分条目。</sys:String>
+    <sys:String x:Key="L.Session.KindAdded">新增</sys:String>
+    <sys:String x:Key="L.Session.KindDeleted">删除</sys:String>
+    <sys:String x:Key="L.Session.KindModified">修改</sys:String>
+    <sys:String x:Key="L.Session.KindConflict">冲突</sys:String>
+    <sys:String x:Key="L.Session.NeedsGitIndex">需要 Git 索引</sys:String>
+    <sys:String x:Key="L.Session.ToolsNotGranted">工具未授权</sys:String>
+    <sys:String x:Key="L.Session.RvmUnavailable">RVM 不可用</sys:String>
+    <sys:String x:Key="L.Session.RvmReady">RVM 就绪 · 会话盘已挂载</sys:String>
+    <sys:String x:Key="L.Session.NoToolsNote">本次未启用额外工具。</sys:String>
+    <sys:String x:Key="L.Session.ToolsNote">本次启用工具：{0}。</sys:String>
+    <sys:String x:Key="L.Session.NetworkOpenNote">网络为出站放行，宿主 loopback 与入站端口保持遮罩。</sys:String>
+    <sys:String x:Key="L.Session.NetworkClosedNote">网络未放行，宿主端口全部遮罩。</sys:String>
+    <sys:String x:Key="L.Session.DevicesNote">设备穿透：{0}。</sys:String>
+    <sys:String x:Key="L.Session.NoDevicesNote">未暴露设备。</sys:String>
+    <sys:String x:Key="L.Session.RvmReadyDetail">会话在独立会话盘 {0} 上运行，内容来自工作区选择性快照（源码与配置）；宿主目录 {1} 未授权给沙箱，文件读写与 shell 都只落在会话盘与专用 temp。{2}{3}{4}</sys:String>
+
+    <!--  RVM install / status  -->
+    <sys:String x:Key="L.WinFsp.Installed">已安装 {0}</sys:String>
+    <sys:String x:Key="L.WinFsp.NotInstalled">未安装</sys:String>
+    <sys:String x:Key="L.WinFsp.Repair">修复 / 重装</sys:String>
+    <sys:String x:Key="L.WinFsp.Install">安装 WinFsp</sys:String>
+    <sys:String x:Key="L.RvmStatus.SyncedTools">已同步 {0} 个工具授权</sys:String>
+    <sys:String x:Key="L.RvmStatus.Ready">{0} 已连接</sys:String>
+    <sys:String x:Key="L.RvmStatus.NotRunning">RVM 引擎未启动</sys:String>
+    <sys:String x:Key="L.RvmStatus.Stopped">RVM 引擎已停止</sys:String>
+    <sys:String x:Key="L.RvmStatus.SessionReady">RVM 会话就绪：{0}</sys:String>
+    <sys:String x:Key="L.RvmStatus.Changes">工作区变更：{0} 项，冲突 {1} 项</sys:String>
+    <sys:String x:Key="L.RvmStatus.Synced">已同步 {0} 项，冲突 {1} 项</sys:String>
+    <sys:String x:Key="L.RvmStatus.RolledBack">会话盘已回滚到宿主工作区</sys:String>
+    <sys:String x:Key="L.RvmStatus.RollbackSkipped">RVM 引擎未执行回滚</sys:String>
+    <sys:String x:Key="L.RvmStatus.EngineMissing">RVM 引擎不可用：未找到 RvmEngine.exe</sys:String>
+    <sys:String x:Key="L.RvmStatus.EngineConnected">RVM 引擎 {0} 已连接</sys:String>
+
+    <!--  Workspace editor Git status  -->
+    <sys:String x:Key="L.GitStatus.Processing">正在处理 Git 索引，请稍候。</sys:String>
+    <sys:String x:Key="L.GitStatus.NeedsIndex">RVM 需要工作区的 Git 索引。请点击“全面索引”为整个工作区建立索引（无代码的办公目录推荐），或先建立普通 Git 索引。</sys:String>
+    <sys:String x:Key="L.GitStatus.BuildingFull">正在为整个工作区建立索引…</sys:String>
+    <sys:String x:Key="L.GitStatus.Building">正在建立 Git 索引…</sys:String>
+    <sys:String x:Key="L.GitStatus.Checking">正在检查 Git 索引…</sys:String>
+    <sys:String x:Key="L.GitStatus.Ready">Git 索引已就绪，共 {0} 个文件。</sys:String>
+    <sys:String x:Key="L.GitStatus.ReadyHint">{0} RVM 用 Git 索引确定会话盘快照范围。没有代码的办公目录建议使用“全面索引”，直接索引整个工作区。</sys:String>
+
+    <!--  RVM penetration  -->
+    <sys:String x:Key="L.Penetration.NoPorts">未检测到串口。设备穿透只支持串口，其他外设保持不可见。</sys:String>
+    <sys:String x:Key="L.Penetration.PortsDetected">检测到 {0} 个串口；勾选后随下次会话授权给沙箱，取消勾选会撤销。</sys:String>
+    <sys:String x:Key="L.Penetration.Saved">已保存；下次启动受保护会话时生效。</sys:String>
+    <sys:String x:Key="L.Penetration.NotDetected">{0}（当前未检测到）</sys:String>
+
+    <!--  ACL items  -->
+    <sys:String x:Key="L.Acl.InvalidStartup">启动检查失效，请重新授权或移除</sys:String>
+    <sys:String x:Key="L.Acl.Granted">已授权</sys:String>
+    <sys:String x:Key="L.Acl.Pending">待授权</sys:String>
+    <sys:String x:Key="L.Acl.Regrant">需要重新授权</sys:String>
+    <sys:String x:Key="L.Acl.RetryRevoke">继续撤销</sys:String>
+    <sys:String x:Key="L.Acl.RetryGrant">重新授权</sys:String>
+    <sys:String x:Key="L.Acl.GrantOperation">授权</sys:String>
+    <sys:String x:Key="L.Acl.RevokeOperation">撤销</sys:String>
+    <sys:String x:Key="L.Acl.Writing">正在写入继承授权…</sys:String>
+    <sys:String x:Key="L.Acl.Cleaning">正在清理授权…</sys:String>
+    <sys:String x:Key="L.Acl.Counting">正在统计对象…</sys:String>
+    <sys:String x:Key="L.Acl.InProgress">{0}中 {1}/{2}</sys:String>
+    <sys:String x:Key="L.Acl.GrantFailed">授权失败</sys:String>
+    <sys:String x:Key="L.Acl.RevokeFailed">撤销失败</sys:String>
+</ResourceDictionary>

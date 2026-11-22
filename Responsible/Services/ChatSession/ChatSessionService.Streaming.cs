@@ -44,7 +44,7 @@ public sealed partial class ChatSessionService
                         var text = _messages[index].Text;
                         errorChunk = failure is null
                             ? null
-                            : (text.Length > 0 ? "\n\n" : "") + "请求失败：" + failure;
+                            : (text.Length > 0 ? "\n\n" : "") + "Request failed: " + failure;
                         // 结果帧丢失/轮次中断时，未落定的工具按已停止收尾，不假装成功
                         var tools = _messages[index].Tools;
                         if (tools is { } pending && pending.Any(tool => tool.State == "running"))
@@ -395,11 +395,11 @@ public sealed partial class ChatSessionService
                        && error.ValueKind == JsonValueKind.Object
                        && error.TryGetProperty("message", out var message)
                 ? message.GetString()
-                : "模型调用失败",
-            "aborted" => "已停止",
-            "blocked" => "请求被拦截",
-            "max-tokens" => "超出输出上限",
-            "interrupted" => "会话被中断",
+                : "Model call failed",
+            "aborted" => "Stopped",
+            "blocked" => "Request blocked",
+            "max-tokens" => "Output limit exceeded",
+            "interrupted" => "Conversation interrupted",
             _ => null,
         };
     }
@@ -413,7 +413,7 @@ public sealed partial class ChatSessionService
             if (index >= 0 && _messages[index].State == "streaming")
             {
                 var prefix = _messages[index].Text.Length > 0 ? "\n\n" : "";
-                chunk = prefix + "请求失败：" + message;
+                chunk = prefix + "Request failed: " + message;
                 _messages[index] = _messages[index] with
                 {
                     Text = _messages[index].Text + chunk,

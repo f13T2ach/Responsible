@@ -18,7 +18,7 @@ AvailabilityReport AllOk() {
 }
 }  // namespace
 
-RVM_TEST(availability_requires_every_probe) {
+RVM_TEST(availability_requires_appcontainer) {
   AvailabilityReport report = AllOk();
   RVM_CHECK(report.rvm_available());
   RVM_CHECK(report.reason().empty());
@@ -29,7 +29,7 @@ RVM_TEST(availability_requires_every_probe) {
   RVM_CHECK(report.reason().find("not probed") != std::string::npos);
 }
 
-RVM_TEST(availability_reason_lists_all_problems) {
+RVM_TEST(availability_reason_only_lists_appcontainer) {
   AvailabilityReport report;
   report.appcontainer = {ProbeState::kFailed, "userenv.dll is missing"};
   report.vbs = {ProbeState::kFailed, "disabled"};
@@ -37,9 +37,22 @@ RVM_TEST(availability_reason_lists_all_problems) {
 
   const std::string reason = report.reason();
   RVM_CHECK(reason.find("appcontainer") != std::string::npos);
-  RVM_CHECK(reason.find("vbs") != std::string::npos);
-  RVM_CHECK(reason.find("hvci") != std::string::npos);
+  RVM_CHECK(reason.find("vbs") == std::string::npos);
+  RVM_CHECK(reason.find("hvci") == std::string::npos);
   RVM_CHECK(!report.rvm_available());
+}
+
+RVM_TEST(availability_vbs_and_hvci_are_informational) {
+  AvailabilityReport report = AllOk();
+  report.vbs = {ProbeState::kFailed, "disabled"};
+  report.hvci = {ProbeState::kFailed, "memory integrity is off"};
+  RVM_CHECK(report.rvm_available());
+  RVM_CHECK(report.reason().empty());
+
+  const std::string summary = report.Summary();
+  RVM_CHECK(summary.find("vbs=failed") != std::string::npos);
+  RVM_CHECK(summary.find("hvci=failed") != std::string::npos);
+  RVM_CHECK(summary.find("rvm_available=true") != std::string::npos);
 }
 
 RVM_TEST(availability_winfsp_is_reported_but_optional) {
@@ -56,8 +69,8 @@ RVM_TEST(availability_summary_exposes_availability) {
   RVM_CHECK(summary.find("backend=sandbox") != std::string::npos);
   RVM_CHECK(summary.find("rvm_available=true") != std::string::npos);
 
-  report.hvci = {ProbeState::kFailed, "memory integrity is off"};
+  report.appcontainer = {ProbeState::kFailed, "appcontainer is unavailable"};
   const std::string failed = report.Summary();
   RVM_CHECK(failed.find("rvm_available=false") != std::string::npos);
-  RVM_CHECK(failed.find("hvci: failed") != std::string::npos);
+  RVM_CHECK(failed.find("appcontainer: failed") != std::string::npos);
 }

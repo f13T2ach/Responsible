@@ -12,10 +12,10 @@
         <TextBlock FontSize="11.5"
                    TextWrapping="Wrap"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                   Text="沙箱默认只提供一套干净的环境变量。勾选需要额外提供给 AI 的变量（值在启动沙箱时读取，不写入磁盘）。勾选 PATH 时，宿主 PATH 中的绝对本地目录会追加到沙箱 PATH；相对路径、UNC 路径、工作区与临时目录会被忽略。" />
+                   Text="{DynamicResource L.RvmSettings.EnvDesc}" />
 
         <Grid Margin="0,10,0,6">
-            <TextBlock Text="环境变量"
+            <TextBlock Text="{DynamicResource L.RvmSettings.EnvVars}"
                        FontSize="13"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center"
@@ -24,11 +24,11 @@
                        VerticalAlignment="Center"
                        FontSize="11.5"
                        Foreground="{DynamicResource TextFillColorTertiaryBrush}">
-                <Run Text="已选 " /><Run Text="{Binding SelectedEnvironmentCount, Mode=OneWay}" /><Run Text=" 项" />
+                <Run Text="{Binding SelectedEnvironmentText, Mode=OneWay}" />
             </TextBlock>
         </Grid>
         <ui:TextBox Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}"
-                    PlaceholderText="筛选环境变量…"
+                    PlaceholderText="{DynamicResource L.RvmSettings.Filter}"
                     Margin="0,0,0,6" />
         <Border Height="132"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
@@ -51,7 +51,7 @@
         </Border>
 
         <Grid Margin="0,14,0,6">
-            <TextBlock Text="工具目录"
+            <TextBlock Text="{DynamicResource L.RvmSettings.Tools}"
                        FontSize="13"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center"
@@ -61,7 +61,7 @@
                    Margin="0,0,0,6"
                    TextWrapping="Wrap"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                   Text="工具目录来自“设置 → 通用 → ACL 授权管理”。这里只决定本次会话允许使用哪些已授权工具；未勾选的工具不会进入沙箱 PATH，也不携带访问权限。" />
+                   Text="{DynamicResource L.RvmSettings.ToolsDesc}" />
 
         <Border MinHeight="54"
                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
@@ -70,7 +70,7 @@
                 CornerRadius="6"
                 Padding="4">
             <Grid>
-                <TextBlock Text="还没有全局授权的工具目录，请先到“设置 → 通用”添加。"
+                <TextBlock Text="{DynamicResource L.RvmSettings.NoTools}"
                            FontSize="12"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"

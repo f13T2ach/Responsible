@@ -132,16 +132,17 @@ rvm_enable_warnings(rvm_channel)
 
 add_library(rvm_server STATIC
   server/jailbreak_smoke.cpp
+  server/network_audit.cpp
   server/pipe_server.cpp
   server/rpc_dispatcher.cpp
   server/session_manager.cpp
   server/shell_runner.cpp)
 target_include_directories(rvm_server PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(rvm_server PUBLIC rvm_runtime rvm_channel advapi32)
+target_link_libraries(rvm_server PUBLIC rvm_runtime rvm_channel advapi32 iphlpapi ws2_32)
 rvm_enable_warnings(rvm_server)
 
-add_executable(RvmEngine main.cpp client/shell_bridge.cpp)
-target_link_libraries(RvmEngine PRIVATE rvm_server)
+add_executable(RvmEngine main.cpp cli/rvm_cli.cpp client/shell_bridge.cpp)
+target_link_libraries(RvmEngine PRIVATE rvm_server bcrypt)
 rvm_enable_warnings(RvmEngine)
 
 if (MINGW)
@@ -175,7 +176,8 @@ if (RVM_BUILD_TESTS)
     tests/test_capability.cpp
     tests/test_shell_environment.cpp
     tests/test_sessions.cpp
-    tests/test_union_view.cpp)
+    tests/test_union_view.cpp
+    tests/test_workspace_archive.cpp)
   target_include_directories(rvm_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(rvm_tests PRIVATE rvm_server rvm_core rvm_runtime rvm_channel
                                            rvm_protocol)

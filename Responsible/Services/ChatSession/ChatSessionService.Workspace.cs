@@ -1,4 +1,5 @@
 using System.IO;
+using Responsible.Localization;
 
 namespace Responsible.Services;
 
@@ -12,7 +13,29 @@ public sealed partial class ChatSessionService
 
     public bool IsRvmProtected => WorkspaceForCwd(CurrentCwd())?.RvmProtected == true;
 
+    public bool HasActiveRvmSession => _rvmSessionId != 0;
+
+    public string? ActiveRvmRoot => _rvmVirtualRoot;
+
     public WorkspaceDefinition? CurrentWorkspace => WorkspaceForCwd(CurrentCwd());
+
+    public Task<RvmWorkspaceDiff?> DiffRvmWorkspaceAsync(CancellationToken cancellationToken = default) =>
+        _rvmSessionId == 0
+            ? Task.FromResult<RvmWorkspaceDiff?>(null)
+            : _rvm.DiffWorkspaceAsync(_rvmSessionId, cancellationToken);
+
+    public Task<RvmWorkspaceApplyResult?> SyncRvmWorkspaceAsync(
+        bool all,
+        IReadOnlyList<string>? paths = null,
+        CancellationToken cancellationToken = default) =>
+        _rvmSessionId == 0
+            ? Task.FromResult<RvmWorkspaceApplyResult?>(null)
+            : _rvm.SyncWorkspaceAsync(_rvmSessionId, all, paths, cancellationToken);
+
+    public Task<bool?> RollbackRvmWorkspaceAsync(CancellationToken cancellationToken = default) =>
+        _rvmSessionId == 0
+            ? Task.FromResult<bool?>(null)
+            : _rvm.RollbackWorkspaceAsync(_rvmSessionId, cancellationToken);
 
     // 工作区按文件夹归属：会话 cwd 等于或位于某个源文件夹内即视为该工作区
     private WorkspaceDefinition? WorkspaceForCwd(string cwd)
@@ -71,15 +94,31 @@ public sealed partial class ChatSessionService
             return;
         }
 
+        // 会话盘的范围来自 Git 索引；没有索引就无法确定哪些文件进入快照，
+        // 这里直接要求用户先完成索引，而不是退回扫描整个目录。
+        var index = await RvmWorkspaceIndex.InspectAsync(workspaceCwd).ConfigureAwait(false);
+        if (!index.IsReady)
+        {
+            await CloseRvmSessionAsync().ConfigureAwait(false);
+            SetWorkspaceBadge(Loc.T("L.Session.NeedsGitIndex"),
+                index.State == RvmIndexState.GitUnavailable
+                    ? $"{index.Message} Install Git, then create an index while editing the workspace."
+                    : $"{index.Message} Open the workspace editor, enable RVM isolation, run Full index or Standard index, then reopen the conversation.");
+            return;
+        }
+
         var key = definition.RvmKey;
         var selectedTools = ResolveSelectedTools(definition.Settings, out var toolError);
         if (selectedTools is null)
         {
-            SetWorkspaceBadge("工具未授权", toolError);
+            SetWorkspaceBadge(Loc.T("L.Session.ToolsNotGranted"), toolError);
             return;
         }
 
-        var signature = SettingsSignature(definition.Settings, selectedTools);
+        var policy = _rvmPolicy.Current;
+        var signature = SettingsSignature(definition.Settings, selectedTools)
+                        + "\u0003" + policy.NetworkEnabled
+                        + "\u0004" + string.Join('\n', policy.Devices.Order(StringComparer.OrdinalIgnoreCase));
         if (_rvmSessionId != 0 && _rvmVirtualRoot is not null
             && string.Equals(_rvmWorkspaceRoot, workspaceCwd, StringComparison.OrdinalIgnoreCase)
             && string.Equals(_rvmKey, key, StringComparison.Ordinal)
@@ -90,26 +129,27 @@ public sealed partial class ChatSessionService
 
         if (!await _rvm.EnsureRunningAsync().ConfigureAwait(false))
         {
-            SetWorkspaceBadge("RVM 不可用", _rvm.Status);
+            SetWorkspaceBadge(Loc.T("L.Session.RvmUnavailable"), _rvm.Status);
             return;
         }
 
         var allTools = _acl.Grants
-            .Where(grant => grant.State == AclGrantState.Authorized)
+            .Where(grant => grant.State == AclGrantState.Authorized && grant.IsValid)
             .Select(grant => new RvmToolAuthorization(grant.Path, grant.Name, grant.CapabilitySid))
             .ToArray();
         if (!await _rvm.SetToolAuthorizationsAsync(allTools).ConfigureAwait(false))
         {
-            SetWorkspaceBadge("RVM 不可用", _rvm.Status);
+            SetWorkspaceBadge(Loc.T("L.Session.RvmUnavailable"), _rvm.Status);
             return;
         }
 
         var session = await _rvm.CreateWorkspaceSessionAsync(
-                workspaceCwd, string.Empty, string.Empty, definition.Settings, selectedTools)
+                workspaceCwd, _winFsp.DriveLetter, key, definition.Settings, selectedTools,
+                policy.NetworkEnabled, policy.DevicesEnabled ? policy.Devices : [])
             .ConfigureAwait(false);
         if (session is null)
         {
-            SetWorkspaceBadge("RVM 不可用", _rvm.Status);
+            SetWorkspaceBadge(Loc.T("L.Session.RvmUnavailable"), _rvm.Status);
             return;
         }
 
@@ -119,11 +159,17 @@ public sealed partial class ChatSessionService
         _rvmKey = key;
         _rvmSettingsSignature = signature;
         var toolsNote = selectedTools.Count == 0
-            ? "本次未启用额外工具。"
-            : $"本次启用工具：{string.Join("、", selectedTools.Select(tool => tool.Name))}。";
+            ? Loc.T("L.Session.NoToolsNote")
+            : Loc.F("L.Session.ToolsNote", string.Join(Loc.IsChinese ? "、" : ", ", selectedTools.Select(tool => tool.Name)));
+        var networkNote = policy.NetworkEnabled
+            ? Loc.T("L.Session.NetworkOpenNote")
+            : Loc.T("L.Session.NetworkClosedNote");
+        var deviceNote = policy.DevicesEnabled && policy.Devices.Count > 0
+            ? Loc.F("L.Session.DevicesNote", string.Join(Loc.IsChinese ? "、" : ", ", policy.Devices))
+            : Loc.T("L.Session.NoDevicesNote");
         SetWorkspaceBadge(
-            "RVM 就绪 · 工作区隔离",
-            $"shell 在 AppContainer 令牌中执行，仅能读写工作区（{session.VirtualRoot.TrimEnd('\\')}）与专用 temp；宿主用户目录、系统 temp 与未授权工具目录被 ACL 拒绝。{toolsNote}fs 工具只能解析工作区内的路径（插件策略）。");
+            Loc.T("L.Session.RvmReady"),
+            Loc.F("L.Session.RvmReadyDetail", session.VirtualRoot.TrimEnd('\\'), workspaceCwd, toolsNote, networkNote, deviceNote));
     }
 
     private IReadOnlyList<RvmToolAuthorization>? ResolveSelectedTools(RvmSettings settings,
@@ -131,7 +177,7 @@ public sealed partial class ChatSessionService
     {
         error = null;
         var authorized = _acl.Grants
-            .Where(grant => grant.State == AclGrantState.Authorized)
+            .Where(grant => grant.State == AclGrantState.Authorized && grant.IsValid)
             .GroupBy(grant => grant.Path, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(),
                 StringComparer.OrdinalIgnoreCase);
@@ -147,17 +193,17 @@ public sealed partial class ChatSessionService
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException
                                            or PathTooLongException)
             {
-                error = $"工具目录路径无效：{path}";
+                error = $"Invalid tool directory path: {path}";
                 return null;
             }
             if (!authorized.TryGetValue(full, out var grant))
             {
-                error = $"工具目录“{full}”没有全局 ACL 授权。请到“设置 → 通用 → ACL 授权管理”添加或重新授权，或在工作区 RVM 设置中取消勾选。";
+                error = $"Tool directory \"{full}\" has no valid global ACL grant. Add or regrant it in Settings → RVM → ACL grants, or clear it in the workspace RVM settings.";
                 return null;
             }
             if (!Directory.Exists(full))
             {
-                error = $"已授权的工具目录不存在：{full}";
+                error = $"The granted tool directory does not exist: {full}";
                 return null;
             }
             selected.Add(new RvmToolAuthorization(grant.Path, grant.Name, grant.CapabilitySid));
@@ -184,7 +230,8 @@ public sealed partial class ChatSessionService
         var selected = new HashSet<string>(selectedTools.Select(tool => tool.Path),
             StringComparer.OrdinalIgnoreCase);
         var stamps = _acl.Grants
-            .Where(grant => grant.State == AclGrantState.Authorized && selected.Contains(grant.Path))
+            .Where(grant => grant.State == AclGrantState.Authorized && grant.IsValid
+                            && selected.Contains(grant.Path))
             .OrderBy(grant => grant.Path, StringComparer.OrdinalIgnoreCase)
             .Select(grant => string.Join('|', grant.Path, grant.CapabilitySid,
                 grant.AuthorizedAtUnixMs));

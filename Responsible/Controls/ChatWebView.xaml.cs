@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Web.WebView2.Core;
 using Responsible.Infrastructure;
+using Responsible.Localization;
 using Responsible.Messages;
 using Responsible.Services;
 using Wpf.Ui;
@@ -32,6 +33,8 @@ public partial class ChatWebView : UserControl
     public ChatWebView()
     {
         InitializeComponent();
+        // 启动早期的对话框可能早于本控件创建，补读状态避免 WebView2 盖住弹窗
+        _dialogOpen = DialogOpenState.IsOpen;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         WeakReferenceMessenger.Default.Register<ExViewOpenChangedMessage>(
@@ -40,6 +43,8 @@ public partial class ChatWebView : UserControl
             this, static (r, m) => ((ChatWebView)r).OnMoeViewOpenChanged(m.Value));
         WeakReferenceMessenger.Default.Register<DialogOpenChangedMessage>(
             this, static (r, m) => ((ChatWebView)r).OnDialogOpenChanged(m.Value));
+        WeakReferenceMessenger.Default.Register<LanguageChangedMessage>(
+            this, static (r, _) => ((ChatWebView)r).OnLanguageChanged());
     }
 
     public IChatSessionService? Session
@@ -66,6 +71,7 @@ public partial class ChatWebView : UserControl
         _session ??= Session;
         if (_session is { } session) Subscribe(session);
         ApplicationThemeManager.Changed += OnThemeChanged;
+        UpdateWebVisibility();
         RefreshFallback();
         _ = InitializeAsync();
     }
@@ -159,7 +165,7 @@ public partial class ChatWebView : UserControl
         }
         catch (Exception ex) when (ex is IOException or TimeoutException or InvalidOperationException)
         {
-            result = new BranchResult(false, $"分支失败：{ex.Message}");
+            result = new BranchResult(false, $"Branch failed: {ex.Message}");
         }
         if (!result.Ok) Post(new HostToast(result.Message));
     }
@@ -183,16 +189,18 @@ public partial class ChatWebView : UserControl
                 path = Path.Combine(_session?.WorkingDirectory ?? AppContext.BaseDirectory, path);
             if (!File.Exists(path) && !Directory.Exists(path))
             {
-                Post(new HostToast($"文件不存在：{path}"));
+                Post(new HostToast($"File not found: {path}"));
                 return;
             }
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UriFormatException or ArgumentException)
         {
-            Post(new HostToast("无法打开链接"));
+            Post(new HostToast("Unable to open link"));
         }
     }
+
+    private void OnLanguageChanged() => Ui(() => Post(new HostLocale(Loc.Language)));
 
     private void OnThemeChanged(ApplicationTheme theme, System.Windows.Media.Color accent)
     {
@@ -312,7 +320,8 @@ public partial class ChatWebView : UserControl
             session.Messages.Select(ToWire).ToArray(),
             ToWire(session.Stats),
             session.Changes.Select(ToWire).ToArray(),
-            session.IsSessionLoading));
+            session.IsSessionLoading,
+            Loc.Language));
     }
 
     private void Post(object message)

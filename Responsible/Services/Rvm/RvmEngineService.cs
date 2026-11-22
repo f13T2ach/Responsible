@@ -26,7 +26,7 @@ public sealed class RvmEngineService : IRvmEngineService
     private Process? _process;
     private ulong _nextRequestId = 1;
     private bool _connected;
-    private volatile string _status = "RVM 引擎未启动";
+    private volatile string _status = "RVM engine not started";
     private string? _enginePath;
     private string? _pipeName;
     private string? _token;
@@ -79,12 +79,12 @@ public sealed class RvmEngineService : IRvmEngineService
 
             var response = await RequestAsync(body, 80, cancellationToken).ConfigureAwait(false);
             if (response is null) return false;
-            _status = $"已同步 {tools.Count} 个工具授权";
+            _status = $"Synced {tools.Count} tool authorizations";
             return true;
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"同步工具授权失败：{ex.Message}";
+            _status = $"Failed to sync tool authorizations: {ex.Message}";
             ResetConnection();
             return false;
         }
@@ -100,6 +100,8 @@ public sealed class RvmEngineService : IRvmEngineService
         string storageKey,
         RvmSettings? settings = null,
         IReadOnlyList<RvmToolAuthorization>? toolAccess = null,
+        bool networkEnabled = false,
+        IReadOnlyList<string>? devices = null,
         CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -114,12 +116,24 @@ public sealed class RvmEngineService : IRvmEngineService
             {
                 RvmProto.AddVarint(policy, 1, 2); // SANDBOX_MODE_WORKSPACE_WRITE
                 RvmProto.AddVarint(policy, 4, 1); // APPROVAL_MODE_ASK
-                RvmProto.AddBool(policy, 3, false); // network_access
+                RvmProto.AddBool(policy, 3, networkEnabled); // network_access
             });
-            // 直接工作区模式：WinFsp 挂载卷无法向 AppContainer 开放
-            // （winfsp/winfsp#705），叠加层因此不可隔离；不传 overlay/drive/storage。
-            _ = driveLetter;
-            _ = storageKey;
+            // 受保护会话在独立的会话盘上运行：引擎按 git 索引把工作区选择性快照到 RVM 存储，
+            // 用 subst 把会话盘挂到空闲盘符，只把会话盘授权给 AppContainer。
+            RvmProto.AddBool(body, 9, true); // overlay_workspace：会话盘模式
+            if (!string.IsNullOrWhiteSpace(driveLetter))
+                RvmProto.AddString(body, 10, driveLetter.TrimEnd(':'));
+            if (!string.IsNullOrWhiteSpace(storageKey))
+                RvmProto.AddString(body, 11, storageKey);
+            RvmProto.AddBool(body, 7, networkEnabled); // network_access
+            if (devices is not null)
+            {
+                foreach (var device in devices)
+                {
+                    if (!string.IsNullOrWhiteSpace(device))
+                        RvmProto.AddString(body, 15, device);
+                }
+            }
 
             // 环境变量只传值；工具目录改用全局授权同步后的 tool_access，不再按会话路径授权。
             if (settings is not null)
@@ -157,7 +171,7 @@ public sealed class RvmEngineService : IRvmEngineService
             var session = response.Message(20)?.Message(1);
             if (session is null)
             {
-                _status = "RVM 引擎返回了空的会话记录";
+                _status = "RVM engine returned an empty session record";
                 return null;
             }
 
@@ -165,15 +179,15 @@ public sealed class RvmEngineService : IRvmEngineService
             var virtualRoot = session.String(7);
             if (sessionId == 0 || string.IsNullOrEmpty(virtualRoot))
             {
-                _status = "RVM 会话缺少 id 或虚拟工作区路径";
+                _status = "RVM session is missing its id or workspace path";
                 return null;
             }
-            _status = $"RVM 会话就绪：{virtualRoot}";
+            _status = $"RVM session ready: {virtualRoot}";
             return new RvmWorkspaceSession(sessionId, session.String(2), virtualRoot);
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"RVM 会话创建失败：{ex.Message}";
+            _status = $"Failed to create the RVM session: {ex.Message}";
             ResetConnection();
             return null;
         }
@@ -198,13 +212,148 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"RVM 会话关闭失败：{ex.Message}";
+            _status = $"Failed to close the RVM session: {ex.Message}";
         }
         finally
         {
             _gate.Release();
         }
     }
+
+    public async Task<RvmWorkspaceDiff?> DiffWorkspaceAsync(
+        ulong sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_connected)
+            {
+                _status = "RVM engine is not connected; cannot read workspace changes";
+                return null;
+            }
+            var body = new List<byte>();
+            RvmProto.AddVarint(body, 1, sessionId);
+            var response = await RequestAsync(body, 60, cancellationToken).ConfigureAwait(false);
+            if (response is null) return null;
+            var diff = response.Message(60);
+            if (diff is null)
+            {
+                _status = "RVM engine returned an empty change list";
+                return null;
+            }
+            var changes = diff.Messages(1).Select(ParseChange).ToList();
+            var conflicts = diff.Messages(2).Select(ParseConflict).ToList();
+            _status = $"Workspace changes: {changes.Count}, conflicts: {conflicts.Count}";
+            return new RvmWorkspaceDiff(changes, conflicts, diff.Varint(3) != 0);
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            _status = $"Failed to read workspace changes: {ex.Message}";
+            ResetConnection();
+            return null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<RvmWorkspaceApplyResult?> SyncWorkspaceAsync(
+        ulong sessionId,
+        bool all,
+        IReadOnlyList<string>? paths = null,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_connected)
+            {
+                _status = "RVM engine is not connected; cannot sync the workspace";
+                return null;
+            }
+            var body = new List<byte>();
+            RvmProto.AddVarint(body, 1, sessionId);
+            if (paths is not null)
+            {
+                foreach (var path in paths)
+                {
+                    if (!string.IsNullOrWhiteSpace(path)) RvmProto.AddString(body, 2, path);
+                }
+            }
+            RvmProto.AddBool(body, 3, all);
+            var response = await RequestAsync(body, 61, cancellationToken).ConfigureAwait(false);
+            if (response is null) return null;
+            var applied = response.Message(61);
+            if (applied is null)
+            {
+                _status = "RVM engine returned an empty sync result";
+                return null;
+            }
+            var changes = applied.Messages(1).Select(ParseChange).ToList();
+            var conflicts = applied.Messages(2).Select(ParseConflict).ToList();
+            _status = $"Synced {changes.Count} changes, {conflicts.Count} conflicts";
+            return new RvmWorkspaceApplyResult(changes, conflicts);
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            _status = $"Failed to sync the workspace: {ex.Message}";
+            ResetConnection();
+            return null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool?> RollbackWorkspaceAsync(
+        ulong sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_connected)
+            {
+                _status = "RVM engine is not connected; cannot roll back the workspace";
+                return null;
+            }
+            var body = new List<byte>();
+            RvmProto.AddVarint(body, 1, sessionId);
+            var response = await RequestAsync(body, 62, cancellationToken).ConfigureAwait(false);
+            if (response is null) return null;
+            var rolledBack = response.Message(62)?.Varint(1) != 0;
+            _status = rolledBack ? "Session drive rolled back to the host workspace" : "RVM engine did not perform a rollback";
+            return rolledBack;
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            _status = $"Failed to roll back the workspace: {ex.Message}";
+            ResetConnection();
+            return null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static RvmFileChange ParseChange(RvmProtoReader change)
+    {
+        var kind = change.Varint(2) switch
+        {
+            1 => RvmChangeKind.Added,
+            2 => RvmChangeKind.Modified,
+            3 => RvmChangeKind.Deleted,
+            _ => RvmChangeKind.Unspecified,
+        };
+        return new RvmFileChange(change.String(1), kind, change.Varint(6), change.Varint(5));
+    }
+
+    private static RvmSyncConflict ParseConflict(RvmProtoReader conflict) =>
+        new(conflict.String(1), conflict.String(2));
 
     public async Task ShutdownAsync()
     {
@@ -241,7 +390,7 @@ public sealed class RvmEngineService : IRvmEngineService
             _process?.Dispose();
             _process = null;
             IsAvailable = false;
-            _status = "RVM 引擎已停止";
+            _status = "RVM engine stopped";
         }
         finally
         {
@@ -273,7 +422,7 @@ public sealed class RvmEngineService : IRvmEngineService
         var enginePath = ResolveEnginePath();
         if (enginePath is null)
         {
-            _status = "RVM 引擎不可用：未找到 RvmEngine.exe";
+            _status = "RVM engine unavailable: RvmEngine.exe was not found";
             IsAvailable = false;
             return false;
         }
@@ -306,13 +455,13 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            _status = $"RVM 引擎启动失败：{ex.Message}";
+            _status = $"Failed to start the RVM engine: {ex.Message}";
             IsAvailable = false;
             return false;
         }
         if (_process is null)
         {
-            _status = "RVM 引擎启动失败";
+            _status = "Failed to start the RVM engine";
             IsAvailable = false;
             return false;
         }
@@ -326,7 +475,7 @@ public sealed class RvmEngineService : IRvmEngineService
         }
         catch (IOException)
         {
-            _status = "RVM 引擎启动后立即退出";
+            _status = "RVM engine exited immediately after starting";
             IsAvailable = false;
             return false;
         }
@@ -346,9 +495,9 @@ public sealed class RvmEngineService : IRvmEngineService
                 catch (TimeoutException)
                 {
                     if (_process.HasExited)
-                        throw new InvalidOperationException("引擎进程已退出");
+                        throw new InvalidOperationException("The engine process has exited.");
                     if (Environment.TickCount64 > deadline)
-                        throw new TimeoutException("等待引擎命名管道超时");
+                        throw new TimeoutException("Timed out waiting for the engine named pipe.");
                 }
             }
             _pipe = pipe;
@@ -357,7 +506,7 @@ public sealed class RvmEngineService : IRvmEngineService
         catch (Exception ex) when (IsExpected(ex))
         {
             pipe.Dispose();
-            _status = $"RVM 引擎连接失败：{ex.Message}{DrainDetail()}";
+            _status = $"Failed to connect to the RVM engine: {ex.Message}{DrainDetail()}";
             IsAvailable = false;
             ResetConnection();
             return false;
@@ -380,7 +529,7 @@ public sealed class RvmEngineService : IRvmEngineService
             var helloResponse = response.Message(10);
             if (helloResponse is null)
             {
-                _status = "RVM 握手响应缺少 HelloResponse";
+                _status = "RVM handshake response is missing HelloResponse";
                 ResetConnection();
                 IsAvailable = false;
                 return false;
@@ -389,13 +538,13 @@ public sealed class RvmEngineService : IRvmEngineService
             IsAvailable = helloResponse.Varint(7) != 0;
             var reason = helloResponse.String(8);
             _status = IsAvailable
-                ? $"RVM 引擎 {engineVersion} 已连接"
-                : $"RVM 不可用：{(string.IsNullOrEmpty(reason) ? "可用性探测未通过" : reason)}";
+                ? $"RVM engine {engineVersion} connected"
+                : $"RVM unavailable: {(string.IsNullOrEmpty(reason) ? "availability probe failed" : reason)}";
             return IsAvailable;
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            _status = $"RVM 握手失败：{ex.Message}";
+            _status = $"RVM handshake failed: {ex.Message}";
             ResetConnection();
             IsAvailable = false;
             return false;
@@ -406,7 +555,7 @@ public sealed class RvmEngineService : IRvmEngineService
     // 引擎错误码统一落到 Status，调用方拿 null 表示失败。
     private async Task<RvmProtoReader?> RequestAsync(List<byte> body, int bodyField, CancellationToken cancellationToken)
     {
-        if (_pipe is null) throw new InvalidOperationException("管道未连接");
+        if (_pipe is null) throw new InvalidOperationException("The pipe is not connected.");
         var requestId = _nextRequestId++;
         var request = new List<byte>();
         RvmProto.AddVarint(request, 1, 1); // protocol
@@ -419,13 +568,13 @@ public sealed class RvmEngineService : IRvmEngineService
         var payload = await ReadFrameAsync(timeout.Token).ConfigureAwait(false);
         var response = RvmProtoReader.Parse(payload);
         if (response.Varint(2) != requestId)
-            throw new RvmProtocolException("响应 request id 不匹配");
+            throw new RvmProtocolException("Response request id does not match.");
         if (response.Message(3) is { } error)
         {
             var code = error.Varint(1);
             var message = error.String(2);
             var detail = error.String(4);
-            _status = $"RVM 错误 {code}：{message}{(string.IsNullOrEmpty(detail) ? string.Empty : $"（{detail}）")}";
+            _status = $"RVM error {code}: {message}{(string.IsNullOrEmpty(detail) ? string.Empty : $" ({detail})")}";
             return null;
         }
         return response;
@@ -433,9 +582,9 @@ public sealed class RvmEngineService : IRvmEngineService
 
     private async Task WriteFrameAsync(List<byte> payload, ulong requestId, CancellationToken cancellationToken)
     {
-        if (_pipe is null) throw new InvalidOperationException("管道未连接");
-        if (!BitConverter.IsLittleEndian) throw new RvmProtocolException("仅支持小端主机");
-        if (payload.Count > MaxPayloadBytes) throw new RvmProtocolException("请求负载超过上限");
+        if (_pipe is null) throw new InvalidOperationException("The pipe is not connected.");
+        if (!BitConverter.IsLittleEndian) throw new RvmProtocolException("Only little-endian hosts are supported.");
+        if (payload.Count > MaxPayloadBytes) throw new RvmProtocolException("Request payload exceeds the limit.");
         var header = new byte[HeaderSize];
         Magic.CopyTo(header, 0);
         BitConverter.TryWriteBytes(header.AsSpan(4, 2), FrameVersion);
@@ -450,17 +599,17 @@ public sealed class RvmEngineService : IRvmEngineService
 
     private async Task<byte[]> ReadFrameAsync(CancellationToken cancellationToken)
     {
-        if (_pipe is null) throw new InvalidOperationException("管道未连接");
+        if (_pipe is null) throw new InvalidOperationException("The pipe is not connected.");
         var header = new byte[HeaderSize];
         await _pipe.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
         if (!header.AsSpan(0, 4).SequenceEqual(Magic))
-            throw new RvmProtocolException("帧 magic 不正确");
+            throw new RvmProtocolException("Invalid frame magic.");
         var version = BitConverter.ToUInt16(header, 4);
         var type = BitConverter.ToUInt16(header, 6);
         var size = BitConverter.ToUInt32(header, 8);
-        if (version != FrameVersion) throw new RvmProtocolException($"不支持的帧版本 {version}");
-        if (type != FrameResponse) throw new RvmProtocolException($"非预期帧类型 {type}");
-        if (size > MaxPayloadBytes) throw new RvmProtocolException("响应负载超过协议上限");
+        if (version != FrameVersion) throw new RvmProtocolException($"Unsupported frame version {version}.");
+        if (type != FrameResponse) throw new RvmProtocolException($"Unexpected frame type {type}.");
+        if (size > MaxPayloadBytes) throw new RvmProtocolException("Response payload exceeds the protocol limit.");
         var payload = new byte[size];
         await _pipe.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
         return payload;
@@ -513,7 +662,7 @@ public sealed class RvmEngineService : IRvmEngineService
         return trimmed.Length == 1 && trimmed[0] is >= 'A' and <= 'Z' ? trimmed + ":" : "R:";
     }
 
-    private static string? ResolveEnginePath()
+    internal static string? ResolveEnginePath()
     {
         var configured = Environment.GetEnvironmentVariable("RESPONSIBLE_RVM_ENGINE");
         if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;

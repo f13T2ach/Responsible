@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Net.Http;
 using System.Text.Json;
+using Responsible.Localization;
 using Responsible.ViewModel;
 
 namespace Responsible.Services;
@@ -103,7 +104,7 @@ public sealed partial class ChatSessionService
         lock (_gate)
         {
             if (_kernelAssistantId is not null)
-                return new KernelRestartResult(false, "当前回复尚未结束，无法重启内核。");
+                return new KernelRestartResult(false, "The current reply has not finished; the kernel cannot be restarted.");
         }
 
         await _kernel.ShutdownAsync().ConfigureAwait(false);
@@ -113,10 +114,10 @@ public sealed partial class ChatSessionService
 
         var option = CurrentOption();
         if (option is null)
-            return new KernelRestartResult(false, "没有可用模型，无法启动内核。");
+            return new KernelRestartResult(false, "No model is available; the kernel cannot start.");
 
         if (!await EnsureKernelAsync(option).ConfigureAwait(false))
-            return new KernelRestartResult(false, $"内核重启失败：{_kernel.Status}");
+            return new KernelRestartResult(false, $"Kernel restart failed: {_kernel.Status}");
 
         bool persisted;
         lock (_gate) persisted = _sessionPersisted;
@@ -125,7 +126,7 @@ public sealed partial class ChatSessionService
             lock (_gate) _openSessions.Add(_sessionId);
             await RefreshPermissionAsync(_sessionId).ConfigureAwait(false);
         }
-        return new KernelRestartResult(true, "内核已重启，插件更改已生效。");
+        return new KernelRestartResult(true, Loc.T("L.Plugins.KernelRestarted"));
     }
 
     private async Task KernelSendAsync(string id, string prompt, ModelOptionViewModel? option)
@@ -133,7 +134,7 @@ public sealed partial class ChatSessionService
         // 每次发送都要过一遍：内核可能在跑，但路由或会话目录已经变了（SDK 只能在 initialize 时固定）
         if (!await EnsureKernelAsync(option).ConfigureAwait(false))
         {
-            FailAssistant(id, string.IsNullOrWhiteSpace(_kernel.Status) ? "内核不可用" : _kernel.Status);
+            FailAssistant(id, string.IsNullOrWhiteSpace(_kernel.Status) ? "Kernel unavailable" : _kernel.Status);
             return;
         }
         bool persisted;
@@ -165,11 +166,15 @@ public sealed partial class ChatSessionService
             _reasoningStarted = null;
         }
         RunningChanged?.Invoke(true);
-        // 基线快照必须先于模型动手：turn 结束时才能只统计本轮的改动
-        await _changeTracker.BeginAsync(CurrentCwd(), ++_turnSeq).ConfigureAwait(false);
+        // 基线快照必须先于模型动手：turn 结束时才能只统计本轮的改动。
+        // 受保护会话的写入落在会话盘上，改动统计也要以会话盘为根。
+        var trackingRoot = IsRvmProtected && _rvmVirtualRoot is not null
+            ? _rvmVirtualRoot
+            : CurrentCwd();
+        await _changeTracker.BeginAsync(trackingRoot, ++_turnSeq).ConfigureAwait(false);
         if (await _kernel.PromptAsync(CurrentSessionId, prompt).ConfigureAwait(false) is null)
         {
-            FailAssistant(id, string.IsNullOrWhiteSpace(_kernel.Status) ? "发送失败" : _kernel.Status);
+            FailAssistant(id, string.IsNullOrWhiteSpace(_kernel.Status) ? "Send failed" : _kernel.Status);
             return;
         }
         lock (_gate)
@@ -189,21 +194,21 @@ public sealed partial class ChatSessionService
         long atSeq;
         lock (_gate)
         {
-            if (_kernelAssistantId is not null) return new BranchResult(false, "当前回复尚未结束，无法创建分支。");
+            if (_kernelAssistantId is not null) return new BranchResult(false, "The current reply has not finished; a branch cannot be created.");
             var index = _messages.FindIndex(m => m.Id == messageId);
-            if (index < 0) return new BranchResult(false, "找不到要分支的消息。");
+            if (index < 0) return new BranchResult(false, "The message to branch from was not found.");
             var message = _messages[index];
-            if (message.BranchSeq is not { } seq) return new BranchResult(false, "该消息没有可用的分支点。");
-            if (message.BranchUnavailable) return new BranchResult(false, "仅可从已完成轮次的最后一条消息分支。");
+            if (message.BranchSeq is not { } seq) return new BranchResult(false, "This message has no branch point.");
+            if (message.BranchUnavailable) return new BranchResult(false, "Branches can only be created from the last message of a completed turn.");
             parentId = _sessionId;
             atSeq = seq;
         }
 
         if (!await EnsureKernelAsync(null).ConfigureAwait(false))
-            return new BranchResult(false, string.IsNullOrWhiteSpace(_kernel.Status) ? "内核不可用。" : _kernel.Status);
+            return new BranchResult(false, string.IsNullOrWhiteSpace(_kernel.Status) ? "Kernel unavailable." : _kernel.Status);
         var childId = await _kernel.ForkSessionAsync(parentId, atSeq).ConfigureAwait(false);
         if (childId is null)
-            return new BranchResult(false, string.IsNullOrWhiteSpace(_kernel.Status) ? "分支失败。" : _kernel.Status);
+            return new BranchResult(false, string.IsNullOrWhiteSpace(_kernel.Status) ? "Branch failed." : _kernel.Status);
 
         await RefreshConversationsAsync().ConfigureAwait(false);
         await ReloadSessionAsync(childId, resume: true).ConfigureAwait(false);
@@ -233,16 +238,17 @@ public sealed partial class ChatSessionService
     private static string LocalRoute(string providerId) =>
         providerId == "deepseek" ? "deepseek-official" : providerId;
 
-    // 仅当叠加盘会话已经真实建立、且引擎连接参数齐全时才接管 shell；
+    // 仅当会话盘已经真实建立、且引擎连接参数齐全时才接管 shell；
     // 任一缺失都返回 null，让内核保留 DSH 自己的沙箱与“RVM 不可用”提示
     private DshRvmBinding? RvmBinding()
     {
-        if (_rvmSessionId == 0 || _rvmWorkspaceRoot is null) return null;
+        if (_rvmSessionId == 0 || _rvmWorkspaceRoot is null || _rvmVirtualRoot is null) return null;
         var engine = _rvm.EnginePath;
         var pipe = _rvm.PipeName;
         var token = _rvm.Token;
         if (engine is null || pipe is null || token is null) return null;
-        return new DshRvmBinding(engine, pipe, token, _rvmSessionId, _rvmWorkspaceRoot);
+        return new DshRvmBinding(engine, pipe, token, _rvmSessionId, _rvmVirtualRoot,
+            _rvmWorkspaceRoot);
     }
 
     // 绑定变化（例如首次开启 RVM 隔离保护）必须触发内核重启，否则新进程拿不到 RESPONSIBLE_RVM_TOKEN
@@ -250,7 +256,7 @@ public sealed partial class ChatSessionService
         ? null
         : string.Join('|', binding.EnginePath, binding.PipeName, binding.Token,
             binding.SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            binding.WorkspaceRoot);
+            binding.WorkspaceRoot, binding.HostWorkspaceRoot);
 
     private static string CredentialRefFor(string provider)
     {

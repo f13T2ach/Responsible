@@ -90,7 +90,8 @@ public sealed record HostInit(
     IReadOnlyList<WireMessage> Messages,
     WireStats Stats,
     IReadOnlyList<WireChanges> Changes,
-    bool Loading)
+    bool Loading,
+    string Locale)
 {
     public string Type => "init";
 }
@@ -98,6 +99,11 @@ public sealed record HostInit(
 public sealed record HostTheme(string Theme, WebPalette Colors)
 {
     public string Type => "theme";
+}
+
+public sealed record HostLocale(string Locale)
+{
+    public string Type => "locale";
 }
 
 public sealed record HostHistoryReset(IReadOnlyList<WireMessage> Messages)

@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -9,8 +11,9 @@ using System.Text.Json.Serialization;
 namespace Responsible.Services;
 
 // 一次性 ACL 授权的宿主侧实现。每个工具目录派生一个稳定的 capability SID，
-// 只向目录树里的对象添加/删除这个 SID 的显式 ACE；不重写 DACL、不改变继承、
-// 不碰 owner/SACL，因此原有权限保持原样。
+// 只在目录根写入一条可继承（OI|CI）的 ACE，让 Windows 在访问检查时把权限
+// 传播给整棵树，不逐个改写子对象 DACL；撤销时会清理旧版本遗留的逐对象 ACE。
+// 不重写 DACL、不碰 owner/SACL，因此原有权限保持原样。
 public sealed class AclAuthorizationService : IAclAuthorizationService
 {
     private static readonly string StorePath = Path.Combine(
@@ -31,6 +34,8 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
     private const int TrusteeIsUnknown = 0;
     private const int GrantAccess = 1;
     private const int RevokeAccess = 4;
+    private const int ObjectInheritAce = 0x1;
+    private const int ContainerInheritAce = 0x2;
 
     private readonly object _lock = new();
     private readonly SemaphoreSlim _operation = new(1, 1);
@@ -49,6 +54,48 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
 
     public string? LoadError { get; }
 
+    public IReadOnlyList<AclValidationIssue> RefreshValidity()
+    {
+        lock (_lock)
+        {
+            var issues = new List<AclValidationIssue>();
+            var changed = false;
+            for (var index = 0; index < _grants.Count; index++)
+            {
+                var grant = _grants[index];
+                var (valid, detail) = ValidateGrant(grant);
+                if (!valid) issues.Add(new AclValidationIssue(grant.Path, grant.Name, detail));
+                if (grant.IsValid == valid) continue;
+                _grants[index] = grant with { IsValid = valid };
+                changed = true;
+            }
+
+            if (changed && !TrySaveLocked(out var saveError))
+                issues.Add(new AclValidationIssue("ACL grants", "acl-authorizations.json", saveError));
+            return issues;
+        }
+    }
+
+    private static (bool Valid, string Detail) ValidateGrant(AclToolGrant grant)
+    {
+        if (!Directory.Exists(grant.Path)) return (false, "The tool directory no longer exists");
+        try
+        {
+            if (!HasInheritableAceAt(grant.Path, grant.CapabilitySid))
+                return (false, "The directory root is missing an inheritable RVM ACE; regrant it");
+            if (!string.Equals(DeriveCapabilitySid(CapabilityName(grant.Path)),
+                    grant.CapabilitySid, StringComparison.OrdinalIgnoreCase))
+                return (false, "The capability SID does not match the directory path; remove and re-add it");
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException
+                                       or System.Security.SecurityException)
+        {
+            return (false, $"Unable to read directory permissions: {ex.Message}");
+        }
+        return (true, string.Empty);
+    }
+
     public (AclToolGrant? Grant, string? Error) Prepare(string path)
     {
         string full;
@@ -58,17 +105,17 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return (null, "工具目录路径无效。");
+            return (null, "Invalid tool directory path.");
         }
         full = Path.TrimEndingDirectorySeparator(full);
-        if (!Directory.Exists(full)) return (null, "工具目录不存在。");
+        if (!Directory.Exists(full)) return (null, "The tool directory does not exist.");
         if (string.Equals(full, Path.GetPathRoot(full)?.TrimEnd(Path.DirectorySeparatorChar),
                 StringComparison.OrdinalIgnoreCase))
-            return (null, "不能把整个盘符作为工具目录。");
+            return (null, "An entire drive cannot be used as a tool directory.");
         lock (_lock)
         {
             if (_grants.Any(item => string.Equals(item.Path, full, StringComparison.OrdinalIgnoreCase)))
-                return (null, "这个目录已经在授权列表中。");
+                return (null, "This directory is already in the grant list.");
         }
 
         string capability;
@@ -78,7 +125,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
         {
-            return (null, $"无法派生 RVM 能力 SID：{ex.Message}");
+            return (null, $"Unable to derive the RVM capability SID: {ex.Message}");
         }
         return (new AclToolGrant(Guid.NewGuid().ToString("n"), full,
             new DirectoryInfo(full).Name, capability, 0, AclGrantState.Pending, null), null);
@@ -103,6 +150,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
                     State = AclGrantState.Authorized,
                     AuthorizedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                     LastError = null,
+                    IsValid = true,
                 }
                 : pending with { State = AclGrantState.Error, LastError = result.Message };
             TryUpsert(state, out var saveError);
@@ -112,9 +160,9 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
         catch (OperationCanceledException)
         {
-            TryUpsert(grant with { State = AclGrantState.Error, LastError = "操作已取消。" },
+            TryUpsert(grant with { State = AclGrantState.Error, LastError = "Operation canceled." },
                 out _);
-            return new AclResult(false, "操作已取消。", 0);
+            return new AclResult(false, "Operation canceled.", 0);
         }
         finally
         {
@@ -147,9 +195,9 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
         catch (OperationCanceledException)
         {
-            TryUpsert(grant with { State = AclGrantState.Error, LastError = "操作已取消。" },
+            TryUpsert(grant with { State = AclGrantState.Error, LastError = "Operation canceled." },
                 out _);
-            return new AclResult(false, "操作已取消。", 0);
+            return new AclResult(false, "Operation canceled.", 0);
         }
         finally
         {
@@ -160,16 +208,70 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
     private static AclResult ApplyTree(string root, string capabilitySid, bool grant,
         IProgress<AclProgress>? progress, CancellationToken cancellationToken)
     {
+        return grant
+            ? GrantRoot(root, capabilitySid, progress)
+            : RevokeTree(root, capabilitySid, progress, cancellationToken);
+    }
+
+    // 一条 OI|CI 的根 ACE 覆盖整棵树：Windows 在访问检查时评估继承，已存在和
+    // 将来新增的子对象都自动生效，不需要逐个目录/文件写规则。
+    private static AclResult GrantRoot(string root, string capabilitySid,
+        IProgress<AclProgress>? progress)
+    {
+        progress?.Report(new AclProgress(0, 1, root));
+        try
+        {
+            if (!HasInheritableAceAt(root, capabilitySid))
+            {
+                // 旧版本在根上留下的是不可继承 ACE，先撤掉再写入继承 ACE。
+                ApplyAce(root, capabilitySid, grant: false);
+                ApplyAce(root, capabilitySid, grant: true,
+                    ObjectInheritAce | ContainerInheritAce);
+            }
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException
+                                       or UnauthorizedAccessException
+                                       or System.Security.SecurityException)
+        {
+            return new AclResult(false, $"{root}：{ex.Message}", 1);
+        }
+        progress?.Report(new AclProgress(1, 1, root));
+        return new AclResult(true, "Wrote an inheritable read/execute grant at the directory root.", 0);
+    }
+
+    // 撤销时仍遍历一次：新授权只会在根上留下继承 ACE（撤根即止），但旧版本
+    // 可能已经给每个子对象写过显式 ACE，这里顺手清掉，避免遗留授权。
+    private static AclResult RevokeTree(string root, string capabilitySid,
+        IProgress<AclProgress>? progress, CancellationToken cancellationToken)
+    {
         var entries = new List<(string Path, bool IsDirectory)>();
         var errors = new List<string>();
         var failed = 0;
+        var changed = 0;
         progress?.Report(new AclProgress(0, 0, root));
         Enumerate(root, entries, errors, ref failed);
         if (entries.Count == 0)
-            return new AclResult(false, "工具目录里没有可授权的对象。", failed);
+            return new AclResult(false, "The tool directory contains no objects to revoke from.", failed);
 
         var total = entries.Count;
         var processed = 0;
+
+        // 先撤根 ACE：系统会级联移除子对象上的继承副本，子对象无需重写 DACL。
+        try
+        {
+            if (ApplyAce(root, capabilitySid, grant: false)) ++changed;
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException
+                                       or InvalidOperationException
+                                       or UnauthorizedAccessException
+                                       or System.Security.SecurityException)
+        {
+            ++failed;
+            if (errors.Count < 20) errors.Add($"{root}：{ex.Message}");
+        }
+        ++processed;
+        progress?.Report(new AclProgress(processed, total, root));
+
         // 文件先处理：给目录写 DACL 可能触发子树继承刷新，放在后面能少做一次。
         for (var pass = 0; pass < 2; ++pass)
         {
@@ -177,12 +279,16 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
             foreach (var (path, isDirectory) in entries)
             {
                 if (isDirectory != wantDirectory) continue;
+                if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase)) continue;
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    ApplyAce(path, capabilitySid, grant);
+                    // 子对象的继承 ACE 随撤根自动消失；这里只清理旧版本遗留的显式 ACE。
+                    if (HasExplicitAce(path, isDirectory, capabilitySid)
+                        && ApplyAce(path, capabilitySid, grant: false)) ++changed;
                 }
                 catch (Exception ex) when (ex is Win32Exception or IOException
+                                               or InvalidOperationException
                                                or UnauthorizedAccessException
                                                or System.Security.SecurityException)
                 {
@@ -197,14 +303,13 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
 
         if (failed > 0)
         {
-            var action = grant ? "授予" : "撤销";
             return new AclResult(false,
-                $"{action}完成，但 {failed} 个对象失败：{string.Join("；", errors.Take(3))}",
+                $"Revocation completed, but {failed} objects failed: {string.Join("; ", errors.Take(3))}",
                 failed);
         }
         progress?.Report(new AclProgress(total, total, root));
         return new AclResult(true,
-            grant ? $"已为 {total} 个对象授予读取/执行权限。" : $"已撤销 {total} 个对象的 RVM 权限。",
+            changed == 0 ? "This tool directory has no RVM grant to revoke." : $"Revoked RVM permissions on {changed} objects.",
             0);
     }
 
@@ -253,10 +358,10 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
     }
 
-    private static void ApplyAce(string path, string capabilitySid, bool grant)
+    private static bool ApplyAce(string path, string capabilitySid, bool grant, int inheritance = 0)
     {
         if (!Native.ConvertStringSidToSidW(capabilitySid, out var sid) || sid == IntPtr.Zero)
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "RVM capability SID 无效");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Invalid RVM capability SID");
         IntPtr descriptor = IntPtr.Zero;
         IntPtr newAcl = IntPtr.Zero;
         try
@@ -265,18 +370,18 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
                 IntPtr.Zero, IntPtr.Zero, out var dacl, IntPtr.Zero, out descriptor);
             if (status != 0) throw new Win32Exception((int)status);
 
-            var exists = HasExplicitAce(dacl, capabilitySid);
-            if (grant == exists) return;
+            var exists = HasAce(dacl, capabilitySid);
+            if (grant == exists) return false;
 
             // 空 DACL 表示所有人完全访问；此时添加 ACE 会收窄权限，宁可拒绝。
             if (dacl == IntPtr.Zero)
-                throw new InvalidOperationException("对象没有显式 DACL，无法在不改变权限的情况下修改。");
+                throw new InvalidOperationException("The object has no explicit DACL and cannot be modified without changing permissions.");
 
             var entry = new Native.ExplicitAccess
             {
                 AccessPermissions = grant ? ToolRights : 0,
                 AccessMode = grant ? GrantAccess : RevokeAccess,
-                Inheritance = 0,
+                Inheritance = grant ? inheritance : 0,
                 Trustee = new Native.Trustee
                 {
                     TrusteeForm = TrusteeIsSid,
@@ -289,6 +394,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
             status = Native.SetNamedSecurityInfoW(path, SeFileObject, DaclSecurityInformation,
                 IntPtr.Zero, IntPtr.Zero, newAcl, IntPtr.Zero);
             if (status != 0) throw new Win32Exception((int)status);
+            return true;
         }
         finally
         {
@@ -298,7 +404,45 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
     }
 
-    private static bool HasExplicitAce(IntPtr dacl, string capabilitySid)
+    private static bool HasInheritableAceAt(string path, string capabilitySid)
+    {
+        var status = Native.GetNamedSecurityInfoW(path, SeFileObject, DaclSecurityInformation,
+            IntPtr.Zero, IntPtr.Zero, out var dacl, IntPtr.Zero, out var descriptor);
+        if (status != 0) throw new Win32Exception((int)status);
+        try
+        {
+            return HasInheritableAce(dacl, capabilitySid);
+        }
+        finally
+        {
+            Native.LocalFree(descriptor);
+        }
+    }
+
+    // 只统计显式 ACE；继承副本由父目录管理，撤销时不该逐个重写。
+    private static bool HasExplicitAce(string path, bool isDirectory, string capabilitySid)
+    {
+        FileSystemSecurity security = isDirectory
+            ? new DirectorySecurity(path, AccessControlSections.Access)
+            : new FileSecurity(path, AccessControlSections.Access);
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                     includeExplicit: true, includeInherited: false,
+                     targetType: typeof(SecurityIdentifier)))
+        {
+            if (string.Equals(rule.IdentityReference.Value, capabilitySid,
+                    StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static bool HasAce(IntPtr dacl, string capabilitySid) =>
+        HasMatchingAce(dacl, capabilitySid, requireInheritable: false);
+
+    private static bool HasInheritableAce(IntPtr dacl, string capabilitySid) =>
+        HasMatchingAce(dacl, capabilitySid, requireInheritable: true);
+
+    private static bool HasMatchingAce(IntPtr dacl, string capabilitySid, bool requireInheritable)
     {
         if (dacl == IntPtr.Zero) return false;
         var status = Native.GetExplicitEntriesFromAclW(dacl, out var count, out var entries);
@@ -311,6 +455,10 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
                 var entry = Marshal.PtrToStructure<Native.ExplicitAccess>(
                     IntPtr.Add(entries, checked((int)index * size)));
                 if (entry.Trustee.TrusteeForm != TrusteeIsSid || entry.Trustee.Name == IntPtr.Zero)
+                    continue;
+                if (requireInheritable
+                    && (entry.Inheritance & (ObjectInheritAce | ContainerInheritAce))
+                    != (ObjectInheritAce | ContainerInheritAce))
                     continue;
                 if (!Native.ConvertSidToStringSidW(entry.Trustee.Name, out var text)
                     || text == IntPtr.Zero)
@@ -355,14 +503,14 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
             try
             {
                 if (sidCount == 0 || sids == IntPtr.Zero)
-                    throw new InvalidOperationException("系统没有返回 capability SID。");
+                    throw new InvalidOperationException("The system did not return a capability SID.");
                 var sid = Marshal.ReadIntPtr(sids);
                 if (!Native.ConvertSidToStringSidW(sid, out var text) || text == IntPtr.Zero)
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 try
                 {
                     return Marshal.PtrToStringUni(text) ??
-                           throw new InvalidOperationException("capability SID 为空。");
+                           throw new InvalidOperationException("The capability SID is empty.");
                 }
                 finally
                 {
@@ -379,7 +527,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
                 Native.LocalFree(groupSids);
             }
         }
-        throw new InvalidOperationException("系统不支持 DeriveCapabilitySidsFromName。");
+        throw new InvalidOperationException("The system does not support DeriveCapabilitySidsFromName.");
     }
 
     private bool TryUpsert(AclToolGrant grant, out string error)
@@ -414,7 +562,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            error = $"无法保存 ACL 授权清单：{ex.Message}";
+            error = $"Unable to save the ACL grant list: {ex.Message}";
             return false;
         }
     }
@@ -432,11 +580,14 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
                               && !string.IsNullOrWhiteSpace(row.Path)
                               && !string.IsNullOrWhiteSpace(row.CapabilitySid))
                 .Select(NormalizeLoaded)
+                // IsValid 只是启动检查的缓存；旧清单没有这个字段时先按有效加载，
+                // 由启动检查队列重新校验并写回。
+                .Select(row => row with { IsValid = true })
                 .ToList();
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            error = $"无法读取 ACL 授权清单：{ex.Message}";
+            error = $"Unable to read the ACL grant list: {ex.Message}";
             return [];
         }
     }
@@ -444,14 +595,14 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
     private static AclToolGrant NormalizeLoaded(AclToolGrant row)
     {
         if (row.State == AclGrantState.Pending)
-            return row with { State = AclGrantState.Error, LastError = "上次操作未完成，请重试或移除。" };
+            return row with { State = AclGrantState.Error, LastError = "The previous operation did not complete. Retry or remove it." };
         if (row.State != AclGrantState.Authorized) return row;
         if (!Directory.Exists(row.Path))
         {
             return row with
             {
                 State = AclGrantState.Error,
-                LastError = "工具目录已不存在，请重新授权或移除。",
+                LastError = "The tool directory no longer exists; regrant or remove it.",
             };
         }
         try
@@ -461,7 +612,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
                 return row with
                 {
                     State = AclGrantState.Error,
-                    LastError = "没有在工具目录上检测到 RVM 的授权，可能已被重装或恢复；请重新授权。",
+                    LastError = "No RVM grant was detected on the tool directory; it may have been reinstalled or restored. Regrant it.",
                 };
             }
         }
@@ -470,7 +621,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
             return row with
             {
                 State = AclGrantState.Error,
-                LastError = "无法读取工具目录的权限，请重新授权或移除。",
+                LastError = "Unable to read the tool directory permissions; regrant or remove it.",
             };
         }
         return row;
@@ -483,7 +634,7 @@ public sealed class AclAuthorizationService : IAclAuthorizationService
         if (status != 0) throw new Win32Exception((int)status);
         try
         {
-            return HasExplicitAce(dacl, capabilitySid);
+            return HasAce(dacl, capabilitySid);
         }
         finally
         {

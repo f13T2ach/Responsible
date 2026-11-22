@@ -1,21 +1,23 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Responsible.Localization;
 using Responsible.Services;
 
 namespace Responsible.ViewModel;
 
 public partial class AclToolItemViewModel : ObservableObject
 {
-    private string _operation = "授权";
-
     public AclToolItemViewModel(AclToolGrant grant)
     {
         Grant = grant;
         State = grant.State;
-        StatusText = grant.State == AclGrantState.Authorized
-            ? "已授权"
-            : grant.State == AclGrantState.Pending
-                ? "待授权"
-                : "需要重新授权";
+        IsValid = grant.IsValid;
+        StatusText = !grant.IsValid
+            ? Loc.T("L.Acl.InvalidStartup")
+            : grant.State == AclGrantState.Authorized
+                ? Loc.T("L.Acl.Granted")
+                : grant.State == AclGrantState.Pending
+                    ? Loc.T("L.Acl.Pending")
+                    : Loc.T("L.Acl.Regrant");
         Error = grant.LastError ?? string.Empty;
     }
 
@@ -31,13 +33,13 @@ public partial class AclToolItemViewModel : ObservableObject
 
     public bool IsProgressIndeterminate { get; private set; }
 
-    public bool CanRetry => !IsBusy && State == AclGrantState.Error;
+    public bool CanRetry => !IsBusy && (State == AclGrantState.Error || !IsValid);
 
     public bool CanRemove => !IsBusy;
 
     public bool LastOperationWasRevoke { get; private set; }
 
-    public string RetryTip => LastOperationWasRevoke ? "继续撤销" : "重新授权";
+    public string RetryTip => LastOperationWasRevoke ? Loc.T("L.Acl.RetryRevoke") : Loc.T("L.Acl.RetryGrant");
 
     [ObservableProperty]
     private bool _isBusy;
@@ -53,6 +55,10 @@ public partial class AclToolItemViewModel : ObservableObject
 
     [ObservableProperty]
     private AclGrantState _state;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanRetry))]
+    private bool _isValid;
 
     private int Processed { get; set; }
 
@@ -75,18 +81,16 @@ public partial class AclToolItemViewModel : ObservableObject
 
     public void BeginGrant()
     {
-        _operation = "授权";
         LastOperationWasRevoke = false;
         OnPropertyChanged(nameof(RetryTip));
-        Begin("正在统计对象…");
+        Begin(Loc.T("L.Acl.Writing"));
     }
 
     public void BeginRevoke()
     {
-        _operation = "撤销";
         LastOperationWasRevoke = true;
         OnPropertyChanged(nameof(RetryTip));
-        Begin("正在统计对象…");
+        Begin(Loc.T("L.Acl.Cleaning"));
     }
 
     public void ApplyProgress(AclProgress progress)
@@ -96,8 +100,10 @@ public partial class AclToolItemViewModel : ObservableObject
         IsProgressIndeterminate = Total == 0;
         ProgressValue = Total == 0 ? 0 : Math.Clamp(Processed * 100.0 / Total, 0, 100);
         StatusText = IsProgressIndeterminate
-            ? "正在统计对象…"
-            : $"{_operation}中 {Processed}/{Total}";
+            ? Loc.T("L.Acl.Counting")
+            : Loc.F("L.Acl.InProgress",
+                Loc.T(LastOperationWasRevoke ? "L.Acl.RevokeOperation" : "L.Acl.GrantOperation"),
+                Processed, Total);
     }
 
     public void Complete(AclGrantState state, string message)
@@ -107,14 +113,16 @@ public partial class AclToolItemViewModel : ObservableObject
         State = state;
         if (state == AclGrantState.Authorized)
         {
+            IsValid = true;
+            Grant = Grant with { IsValid = true };
             Error = string.Empty;
             ProgressValue = 100;
-            StatusText = "已授权";
+            StatusText = Loc.T("L.Acl.Granted");
         }
         else
         {
             Error = message;
-            StatusText = _operation == "撤销" ? "撤销失败" : "授权失败";
+            StatusText = Loc.T(LastOperationWasRevoke ? "L.Acl.RevokeFailed" : "L.Acl.GrantFailed");
             ProgressValue = 0;
         }
     }

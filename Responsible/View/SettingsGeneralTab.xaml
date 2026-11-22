@@ -9,22 +9,22 @@
              d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
              d:DesignHeight="600" d:DesignWidth="900">
     <StackPanel Margin="0,4,8,0">
-        <TextBlock Text="通用设置"
+        <TextBlock Text="{DynamicResource L.General.Title}"
                    FontSize="17"
                    FontWeight="SemiBold"
                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-        <TextBlock Text="窗口与内嵌 Web 内容共用同一套主题资源。"
+        <TextBlock Text="{DynamicResource L.General.Subtitle}"
                    FontSize="12.5"
                    Margin="0,6,0,14"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
         <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12">
             <StackPanel>
-                <TextBlock Text="外观"
+                <TextBlock Text="{DynamicResource L.General.Appearance}"
                            FontSize="14.5"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                <TextBlock Text="主题模式立即作用于标题栏、侧栏、内容区与历史消息页。"
+                <TextBlock Text="{DynamicResource L.General.AppearanceDesc}"
                            FontSize="12"
                            Margin="0,4,0,12"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -34,11 +34,11 @@
                                  Margin="0,0,10,0">
                         <StackPanel Margin="4,0,0,0">
                             <ui:SymbolIcon Symbol="Desktop24" FontSize="18" HorizontalAlignment="Left" />
-                            <TextBlock Text="跟随系统"
+                            <TextBlock Text="{DynamicResource L.General.System}"
                                        FontSize="13.5"
                                        FontWeight="SemiBold"
                                        Margin="0,6,0,0" />
-                            <TextBlock Text="随 Windows 外观切换"
+                            <TextBlock Text="{DynamicResource L.General.SystemDesc}"
                                        FontSize="11.5"
                                        Margin="0,2,0,0"
                                        TextWrapping="Wrap"
@@ -50,11 +50,11 @@
                                  Margin="0,0,10,0">
                         <StackPanel Margin="4,0,0,0">
                             <ui:SymbolIcon Symbol="WeatherSunny24" FontSize="18" HorizontalAlignment="Left" />
-                            <TextBlock Text="浅色"
+                            <TextBlock Text="{DynamicResource L.General.Light}"
                                        FontSize="13.5"
                                        FontWeight="SemiBold"
                                        Margin="0,6,0,0" />
-                            <TextBlock Text="浅色填充，Web 同浅色背景"
+                            <TextBlock Text="{DynamicResource L.General.LightDesc}"
                                        FontSize="11.5"
                                        Margin="0,2,0,0"
                                        TextWrapping="Wrap"
@@ -65,11 +65,11 @@
                                  IsChecked="{Binding IsDarkTheme}">
                         <StackPanel Margin="4,0,0,0">
                             <ui:SymbolIcon Symbol="WeatherMoon24" FontSize="18" HorizontalAlignment="Left" />
-                            <TextBlock Text="深色"
+                            <TextBlock Text="{DynamicResource L.General.Dark}"
                                        FontSize="13.5"
                                        FontWeight="SemiBold"
                                        Margin="0,6,0,0" />
-                            <TextBlock Text="深色填充，Web 同深色背景"
+                            <TextBlock Text="{DynamicResource L.General.DarkDesc}"
                                        FontSize="11.5"
                                        Margin="0,2,0,0"
                                        TextWrapping="Wrap"
@@ -82,235 +82,19 @@
 
         <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12" Margin="0,12,0,0">
             <StackPanel>
-                <TextBlock Text="WinFsp 虚拟盘"
+                <TextBlock Text="{DynamicResource L.General.Language}"
                            FontSize="14.5"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                <TextBlock Text="沙箱把工作区挂载为独立盘符：Base 只读、Diff 可写，会话结束即回滚。"
+                <TextBlock Text="{DynamicResource L.General.LanguageDesc}"
                            FontSize="12"
                            Margin="0,4,0,12"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <ui:SymbolIcon Grid.Column="0"
-                                   Symbol="HardDrive24"
-                                   FontSize="16"
-                                   VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                        <TextBlock FontSize="13"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}">
-                            <Run Text="状态：" />
-                            <Run Text="{Binding WinFspStatusText, Mode=OneWay}" />
-                        </TextBlock>
-                        <TextBlock Text="安装后 RVM 会话才能挂载工作区盘符；未安装时会话退回 DSH 沙箱。"
-                                   FontSize="11.5"
-                                   Margin="0,2,0,0"
-                                   TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Text="正在安装 WinFsp，请在系统提示中确认管理员权限…"
-                                   FontSize="11.5"
-                                   Margin="0,4,0,0"
-                                   Visibility="{Binding IsWinFspBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="2"
-                                Orientation="Horizontal"
-                                VerticalAlignment="Center">
-                        <ui:Button Content="{Binding WinFspInstallerText}"
-                                   Appearance="Secondary"
-                                   FontSize="12.5"
-                                   Padding="12,6"
-                                   Command="{Binding InstallWinFspCommand}"
-                                   IsEnabled="{Binding IsWinFspNotBusy}" />
-                        <ui:Button Style="{StaticResource MoeToolbarIconButtonStyle}"
-                                   Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
-                                   Margin="8,0,0,0"
-                                   ToolTip="重新检测 WinFsp"
-                                   Command="{Binding RefreshWinFspCommand}"
-                                   IsEnabled="{Binding IsWinFspNotBusy}" />
-                    </StackPanel>
-                </Grid>
-
-                <Separator Margin="0,12,0,10"
-                           Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
-
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0"
-                               Text="虚拟盘符"
-                               FontSize="13"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                    <ComboBox Grid.Column="1"
-                              Width="78"
-                              Margin="12,0,0,0"
-                              ItemsSource="{Binding WinFspDriveLetters}"
-                              SelectedItem="{Binding WinFspDriveLetter}"
-                              IsEnabled="{Binding IsWinFspNotBusy}" />
-                    <TextBlock Grid.Column="2"
-                               Text="默认 R:；仅影响 RVM 挂载的工作区盘符。"
-                               FontSize="11.5"
-                               Margin="12,0,0,0"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                </Grid>
-
-                <TextBlock Text="{Binding WinFspError}"
-                           Margin="0,10,0,0"
-                           FontSize="11.5"
-                           TextWrapping="Wrap"
-                           Visibility="{Binding WinFspError, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
-                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
-            </StackPanel>
-        </Border>
-
-        <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12" Margin="0,12,0,0">
-            <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="ACL 授权管理"
-                                   FontSize="14.5"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                        <TextBlock Text="一次性把工具目录的读取/执行权限授予 RVM 的固定身份。授权与撤销只添加或移除 RVM 自己的 ACE，不改动文件原有的权限配置。"
-                                   FontSize="12"
-                                   Margin="0,4,0,0"
-                                   TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
-                    <ui:Button Grid.Column="1"
-                               Content="添加工具目录"
-                               Icon="{ui:SymbolIcon Symbol=Add24}"
-                               Appearance="Primary"
-                               FontSize="12.5"
-                               Padding="12,6"
-                               Margin="16,0,0,0"
-                               VerticalAlignment="Top"
-                               Click="OnAddAclTool"
-                               IsEnabled="{Binding IsAclNotBusy}" />
-                </Grid>
-
-                <TextBlock Text="还没有授权任何工具目录。先在下面添加，再到工作区设置中勾选本次会话允许使用的工具。"
-                           FontSize="12"
-                           Margin="0,12,0,0"
-                           TextWrapping="Wrap"
-                           Visibility="{Binding HasNoAclAuthorizations, Converter={StaticResource BooleanToVisibilityConverter}}"
-                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-
-                <ItemsControl ItemsSource="{Binding AclAuthorizations}" Margin="0,10,0,0">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Padding="10,8"
-                                    Margin="0,0,0,8"
-                                    CornerRadius="6"
-                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                    BorderThickness="1">
-                                <StackPanel>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <ui:SymbolIcon Grid.Column="0"
-                                                       Symbol="Shield24"
-                                                       FontSize="16"
-                                                       VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                        <StackPanel Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Name}"
-                                                       FontSize="13"
-                                                       FontWeight="SemiBold"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                                            <TextBlock Text="{Binding Path}"
-                                                       FontSize="11"
-                                                       Margin="0,2,0,0"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       ToolTip="{Binding Path}"
-                                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <ui:Button Style="{StaticResource MoeToolbarIconButtonStyle}"
-                                                       Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
-                                                       ToolTip="{Binding RetryTip}"
-                                                       Command="{Binding DataContext.RetryAclCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                       CommandParameter="{Binding}"
-                                                       Visibility="{Binding CanRetry, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                            <ui:Button Style="{StaticResource MoeToolbarIconButtonStyle}"
-                                                       Icon="{ui:SymbolIcon Symbol=Delete24}"
-                                                       Margin="6,0,0,0"
-                                                       ToolTip="移除授权"
-                                                       Command="{Binding DataContext.RemoveAclCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                       CommandParameter="{Binding}"
-                                                       IsEnabled="{Binding CanRemove}" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <ProgressBar Height="4"
-                                                 Margin="0,8,0,0"
-                                                 BorderThickness="0"
-                                                 Maximum="100"
-                                                 Value="{Binding ProgressValue}"
-                                                 IsIndeterminate="{Binding IsProgressIndeterminate}"
-                                                 Visibility="{Binding IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                 Foreground="{DynamicResource AccentFillColorDefaultBrush}"
-                                                 Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
-
-                                    <TextBlock Text="{Binding StatusText}"
-                                               FontSize="11.5"
-                                               Margin="0,6,0,0"
-                                               TextWrapping="Wrap">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding HasError}" Value="True">
-                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding Error}"
-                                               FontSize="11.5"
-                                               Margin="0,3,0,0"
-                                               TextWrapping="Wrap"
-                                               Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                               Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
-                <TextBlock Text="工具目录里新增或更新的文件不会自动获得授权，重新点击“重新授权”即可补齐。"
-                           FontSize="11.5"
-                           Margin="0,2,0,0"
-                           TextWrapping="Wrap"
-                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-
-                <TextBlock Text="{Binding AclError}"
-                           Margin="0,8,0,0"
-                           FontSize="11.5"
-                           TextWrapping="Wrap"
-                           Visibility="{Binding AclError, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
-                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                <ComboBox Width="200"
+                          HorizontalAlignment="Left"
+                          FontSize="13"
+                          ItemsSource="{Binding LanguageOptions}"
+                          SelectedItem="{Binding SelectedLanguage}" />
             </StackPanel>
         </Border>
     </StackPanel>

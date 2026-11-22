@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using Responsible.Localization;
 using Responsible.ViewModel;
 
 namespace Responsible.View;
@@ -14,7 +15,7 @@ public partial class WorkspaceEditorView : UserControl
 
     private void OnBrowseFolders(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择工作区文件夹", Multiselect = true };
+        var dialog = new OpenFolderDialog { Title = Loc.T("L.Common.SelectWorkspaceFolder"), Multiselect = true };
         if (dialog.ShowDialog() != true) return;
         foreach (var folder in dialog.FolderNames)
             ViewModel?.AddFolder(folder);

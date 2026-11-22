@@ -95,8 +95,9 @@ export interface WireStats {
 }
 
 export type HostMessage =
-  | { type: "init"; protocol: 1; theme: "dark" | "light"; colors: Palette; messages: WireMessage[]; stats: WireStats; changes?: WireChanges[]; loading?: boolean }
+  | { type: "init"; protocol: 1; theme: "dark" | "light"; colors: Palette; locale?: string; messages: WireMessage[]; stats: WireStats; changes?: WireChanges[]; loading?: boolean }
   | { type: "theme"; theme: "dark" | "light"; colors: Palette }
+  | { type: "locale"; locale: string }
   | { type: "history.reset"; messages: WireMessage[] }
   | { type: "history.loading"; loading: boolean }
   | { type: "message.append"; message: WireMessage }

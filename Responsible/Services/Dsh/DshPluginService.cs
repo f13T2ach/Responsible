@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using Responsible.Localization;
 using Responsible.MoeViews.Plugins;
 
 namespace Responsible.Services;
@@ -123,10 +124,10 @@ public sealed class DshPluginService : IDshPluginService
             var readOnlyReason = canToggle
                 ? null
                 : hostProtected
-                    ? "Responsible 宿主必需，无法停用。"
+                    ? Loc.T("L.Plugins.HostRequired")
                     : row.ReadOnlyReason == "management-required"
-                        ? "DSH 运行必需，无法停用。"
-                        : "该插件不由 DSH patch 管理，无法在此停用。";
+                        ? Loc.T("L.Plugins.DshRequired")
+                        : Loc.T("L.Plugins.NotPatchManaged");
 
             var toggleId = row.PatchId ?? row.EntryId;
             var over = canToggle ? _overrides.Find(toggleId) : null;
@@ -146,8 +147,8 @@ public sealed class DshPluginService : IDshPluginService
                 row.EntryId,
                 toggleId,
                 row.ModuleName,
-                isHostPlugin ? "Responsible 宿主集成" : DisplayName(row.Title, row.ModuleName),
-                isHostPlugin ? "向 DSH 注入 Responsible 的人设与插件桥接。" : row.Description,
+                isHostPlugin ? Loc.T("L.Plugins.HostName") : DisplayName(row.Title, row.ModuleName),
+                isHostPlugin ? Loc.T("L.Plugins.HostDesc") : row.Description,
                 desiredEnabled,
                 pending,
                 canToggle,
@@ -158,10 +159,10 @@ public sealed class DshPluginService : IDshPluginService
         }
 
         var status = isLive
-            ? $"内核运行中 · {plugins.Count} 个插件"
+            ? Loc.F("L.Plugins.KernelRunning", plugins.Count)
             : _cache is not null
-                ? $"{(liveError is null ? "内核未启动" : "内核未响应")} · 上次读取 {_cache.CapturedAt.ToLocalTime():MM-dd HH:mm}"
-                : "内核未启动 · 暂无插件缓存";
+                ? Loc.F("L.Plugins.CacheAge", $"{(liveError is null ? Loc.T("L.Plugins.KernelStopped") : Loc.T("L.Plugins.KernelNoResponse"))} · {_cache.CapturedAt.ToLocalTime():MM-dd HH:mm}")
+                : Loc.T("L.Plugins.NoCache");
         var pendingCount = plugins.Count(plugin => plugin.PendingRestart);
         return new MoePluginInventory(plugins, isLive, _cache?.CapturedAt, status, pendingCount);
     }
@@ -201,7 +202,7 @@ public sealed class DshPluginService : IDshPluginService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Debug.WriteLine($"[plugins] 缓存写入失败：{ex.Message}");
+            Debug.WriteLine($"[plugins] Failed to write plugin cache: {ex.Message}");
         }
     }
 

@@ -80,6 +80,21 @@ public interface IChatSessionService
     string? PermissionValue { get; }
     /// <summary>当前会话所在工作区是否启用了 RVM 隔离保护（工作区显式选项，不是默认值）。</summary>
     bool IsRvmProtected { get; }
+
+    /// <summary>当前对话是否已挂载 RVM 会话盘。</summary>
+    bool HasActiveRvmSession { get; }
+
+    /// <summary>当前会话盘根目录（如 R:\）；无会话时为 null。</summary>
+    string? ActiveRvmRoot { get; }
+
+    Task<RvmWorkspaceDiff?> DiffRvmWorkspaceAsync(CancellationToken cancellationToken = default);
+
+    Task<RvmWorkspaceApplyResult?> SyncRvmWorkspaceAsync(
+        bool all,
+        IReadOnlyList<string>? paths = null,
+        CancellationToken cancellationToken = default);
+
+    Task<bool?> RollbackRvmWorkspaceAsync(CancellationToken cancellationToken = default);
     /// <summary>当前 cwd 归属的工作区；未登记时为 null。</summary>
     WorkspaceDefinition? CurrentWorkspace { get; }
 

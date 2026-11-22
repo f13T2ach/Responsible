@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Responsible.Localization;
 using Responsible.Services;
 
 namespace Responsible.ViewModel;
@@ -59,17 +60,17 @@ public partial class ProviderEditorViewModel : ObservableObject
     private string _protocol = "OpenAI Chat Completions";
 
     [ObservableProperty]
-    private string _modelsSubtitle = "正在使用适配器默认模型";
+    private string _modelsSubtitle = Loc.T("L.Provider.DefaultModels");
 
     public ObservableCollection<ProviderModelEntryViewModel> Models { get; } = [];
 
     public bool IsCustomMode => ModeIndex == 1;
 
-    public string EnvKeyPlaceholder => $"留空使用环境认证（{SelectedCatalogEntry?.EnvKeyVar}）";
+    public string EnvKeyPlaceholder => Loc.F("L.Provider.EnvPlaceholder", SelectedCatalogEntry?.EnvKeyVar);
 
-    public string EnvWarningText => $"未检测到环境变量。请填写 API 密钥，或设置环境变量 {SelectedCatalogEntry?.EnvKeyVar}。";
+    public string EnvWarningText => Loc.F("L.Provider.EnvWarning", SelectedCatalogEntry?.EnvKeyVar);
 
-    public string RegionsHint => "提供方地址配置：" + string.Join(", ", SelectedCatalogEntry?.RegionVars ?? []);
+    public string RegionsHint => Loc.F("L.Provider.RegionsHint", string.Join(", ", SelectedCatalogEntry?.RegionVars ?? []));
 
     public bool ShowEnvWarning => !IsCustomMode
         && SelectedCatalogEntry != null
@@ -111,11 +112,11 @@ public partial class ProviderEditorViewModel : ObservableObject
             Models.Clear();
             foreach (var id in defaults)
                 Models.Add(new ProviderModelEntryViewModel { Id = id });
-            ModelsSubtitle = "正在使用适配器默认模型";
+            ModelsSubtitle = Loc.T("L.Provider.DefaultModels");
         }
         else
         {
-            ModelsSubtitle = "未获取到模型；可手动添加。";
+            ModelsSubtitle = Loc.T("L.Provider.NoModels");
         }
     }
 

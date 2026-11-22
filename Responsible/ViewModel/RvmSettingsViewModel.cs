@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Responsible.Localization;
 using Responsible.Services;
 
 namespace Responsible.ViewModel;
@@ -23,8 +24,8 @@ public partial class RvmEnvironmentItem : ObservableObject
     public bool IsPath => string.Equals(Name, "PATH", StringComparison.OrdinalIgnoreCase);
 
     public string DisplayName => IsPath
-        ? "PATH（追加宿主 PATH 中的可访问目录）"
-        : Available ? Name : $"{Name}（当前不存在）";
+        ? Loc.T("L.RvmSettings.PathOverride")
+        : Available ? Name : Loc.F("L.RvmSettings.Missing", Name);
 }
 
 public partial class RvmToolOptionItem : ObservableObject
@@ -40,7 +41,7 @@ public partial class RvmToolOptionItem : ObservableObject
     public string Name { get; }
     public string Path { get; }
     public bool Available { get; }
-    public string DisplayName => Available ? Name : $"{Name}（未授权）";
+    public string DisplayName => Available ? Name : Loc.F("L.RvmSettings.Unauthorized", Name);
 
     [ObservableProperty]
     private bool _isSelected;
@@ -87,6 +88,8 @@ public partial class RvmSettingsViewModel : ObservableObject
 
     public int SelectedEnvironmentCount => EnvironmentVariables.Count(item => item.IsSelected);
 
+    public string SelectedEnvironmentText => Loc.F("L.RvmSettings.Selected", SelectedEnvironmentCount);
+
     public void Load(IEnumerable<string> environmentNames, IEnumerable<string> toolPaths, bool configured)
     {
         _loading = true;
@@ -123,6 +126,7 @@ public partial class RvmSettingsViewModel : ObservableObject
                     if (args.PropertyName != nameof(RvmEnvironmentItem.IsSelected)) return;
                     if (!_loading) Touched = true;
                     OnPropertyChanged(nameof(SelectedEnvironmentCount));
+                    OnPropertyChanged(nameof(SelectedEnvironmentText));
                 };
                 EnvironmentVariables.Add(item);
             }
@@ -142,7 +146,7 @@ public partial class RvmSettingsViewModel : ObservableObject
     {
         var selected = new HashSet<string>(selectedPaths, StringComparer.OrdinalIgnoreCase);
         var authorized = _acl.Grants
-            .Where(grant => grant.State == AclGrantState.Authorized)
+            .Where(grant => grant.State == AclGrantState.Authorized && grant.IsValid)
             .GroupBy(grant => grant.Path, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(grant => grant.Name, StringComparer.OrdinalIgnoreCase)
@@ -172,7 +176,7 @@ public partial class RvmSettingsViewModel : ObservableObject
         }
 
         if (missing.Length > 0)
-            ToolError = "部分工具目录已不在全局授权列表中，请到“设置 → 通用”重新授权或移除后再保存。";
+            ToolError = "Some tool directories are missing or are no longer globally granted. Regrant or remove them in Settings → RVM before saving.";
 
         HasTools = ToolOptions.Count > 0;
     }

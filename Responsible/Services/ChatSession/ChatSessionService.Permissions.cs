@@ -1,3 +1,5 @@
+using Responsible.Localization;
+
 namespace Responsible.Services;
 
 // 权限（沙箱模式 + 审批策略）全部镜像 DSH 的 permission-presets：目录来自进程级 catalog，
@@ -81,7 +83,7 @@ public sealed partial class ChatSessionService
 
     public async Task<PermissionResult> SelectPermissionAsync(string preset)
     {
-        if (string.IsNullOrWhiteSpace(preset)) return new PermissionResult(false, "未知的权限等级。");
+        if (string.IsNullOrWhiteSpace(preset)) return new PermissionResult(false, "Unknown permission level.");
         if (preset == RvmPresetValue) return await SetRvmProtectionAsync(true).ConfigureAwait(false);
 
         // 选中其它审批等级时关闭 RVM 隔离保护；切换会重启内核，因此以重启后的会话为准
@@ -99,12 +101,12 @@ public sealed partial class ChatSessionService
             persisted = _sessionPersisted;
         }
         if (!persisted)
-            return new PermissionResult(false, "会话尚未建立，发出第一条消息后再切换权限。");
+            return new PermissionResult(false, "The session is not ready yet; send the first message before switching permissions.");
 
         var value = await _kernel.SetPermissionPresetAsync(sessionId, preset).ConfigureAwait(false);
         if (value is null)
             return new PermissionResult(false,
-                string.IsNullOrWhiteSpace(_kernel.Status) ? "切换权限失败。" : _kernel.Status);
+                string.IsNullOrWhiteSpace(_kernel.Status) ? "Failed to switch permission." : _kernel.Status);
         ApplyPermissionValue(sessionId, value);
         return new PermissionResult(true, string.Empty);
     }
@@ -119,11 +121,11 @@ public sealed partial class ChatSessionService
         lock (_gate)
         {
             if (_kernelAssistantId is not null)
-                return new PermissionResult(false, "当前回复尚未结束，无法修改 RVM 设置。");
+                return new PermissionResult(false, "The current reply has not finished; RVM settings cannot be changed.");
         }
 
         var previous = _workspaceStore.All.FirstOrDefault(item => item.Id == workspaceId);
-        if (previous is null) return new PermissionResult(false, "找不到该工作区。");
+        if (previous is null) return new PermissionResult(false, "Workspace not found.");
 
         var updated = previous with
         {
@@ -144,7 +146,7 @@ public sealed partial class ChatSessionService
         {
             _workspaceStore.Add(previous);
             PermissionsChanged?.Invoke();
-            return new PermissionResult(false, $"保存 RVM 设置失败：{restart.Message}");
+            return new PermissionResult(false, $"Failed to save RVM settings: {restart.Message}");
         }
         PermissionsChanged?.Invoke();
         return new PermissionResult(true, string.Empty);
@@ -156,7 +158,7 @@ public sealed partial class ChatSessionService
         lock (_gate)
         {
             if (_kernelAssistantId is not null)
-                return new PermissionResult(false, "当前回复尚未结束，无法切换 RVM 隔离保护。");
+                return new PermissionResult(false, "The current reply has not finished; RVM isolation cannot be toggled.");
         }
 
         var cwd = CurrentCwd();
@@ -165,7 +167,7 @@ public sealed partial class ChatSessionService
         {
             if (!enabled) return new PermissionResult(true, string.Empty);
             var name = WorkspaceNames.DisplayNameFor(cwd);
-            if (WorkspaceNames.Validate(name) is not null) name = "工作区";
+            if (WorkspaceNames.Validate(name) is not null) name = Loc.T("L.Workspace.FallbackName");
             definition = new WorkspaceDefinition(
                 Guid.NewGuid().ToString("n"), name, cwd, [cwd], false);
         }
@@ -195,7 +197,7 @@ public sealed partial class ChatSessionService
             // 启动失败时恢复原状态，避免清单与实际防护不一致
             _workspaceStore.Add(previous);
             PermissionsChanged?.Invoke();
-            return new PermissionResult(false, $"切换 RVM 隔离保护失败：{restart.Message}");
+            return new PermissionResult(false, $"Failed to toggle RVM isolation: {restart.Message}");
         }
 
         PermissionsChanged?.Invoke();

@@ -40,7 +40,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
     private Process? _process;
     private int _nextId;
-    private string _status = "未启动";
+    private string _status = "Not started";
     private CancellationTokenSource? _streamCts;
     private DshRvmBinding? _rvmBinding;
 
@@ -93,7 +93,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         var bin = ResolveBin();
         if (bin is null)
         {
-            Status = "RDshCore 未构建：先运行 scripts/Build-DshCore.ps1";
+            Status = "RDshCore is not built. Run scripts/Build-DshCore.ps1 first.";
             return false;
         }
 
@@ -114,7 +114,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         };
         info.Environment["DSH_HOME"] = HomePath;
         info.Environment["DSH_BRIDGE_PORT"] = BridgePort.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        // 壳桥接进程从内核环境继承引擎令牌；桥接在转发命令前会剥掉 RESPONSIBLE_RVM_* 前缀
+        // 插件在绑定内核时读取令牌并随 --token 传给壳桥接；沙箱子进程不会继承进程环境
         if (_rvmBinding is { } rvm)
             info.Environment["RESPONSIBLE_RVM_TOKEN"] = rvm.Token;
         if (!string.IsNullOrEmpty(apiKey))
@@ -126,12 +126,12 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            Status = $"node 启动失败：{ex.Message}";
+            Status = $"Failed to start node: {ex.Message}";
             return false;
         }
         if (_process is null)
         {
-            Status = "node 启动失败";
+            Status = "Failed to start node";
             return false;
         }
 
@@ -140,7 +140,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         _process.Exited += (_, _) =>
         {
             IsAvailable = false;
-            Status = "runtime 已退出";
+            Status = "Runtime exited";
             _streamCts?.Cancel();
             FailPending();
         };
@@ -159,7 +159,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             var name = result.GetProperty("serverInfo").GetProperty("name").GetString();
             if (name != "deepseek-harness-sdk-runtime")
             {
-                Status = $"握手身份不符：{name}";
+                Status = $"Handshake identity mismatch: {name}";
                 await ShutdownAsync().ConfigureAwait(false);
                 return false;
             }
@@ -169,7 +169,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or KeyNotFoundException or JsonException)
         {
-            Status = $"握手失败：{ex.Message}";
+            Status = $"Handshake failed: {ex.Message}";
             await ShutdownAsync().ConfigureAwait(false);
             return false;
         }
@@ -190,7 +190,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or KeyNotFoundException or JsonException)
         {
-            Status = $"resume 失败：{ex.Message}";
+            Status = $"Resume failed: {ex.Message}";
             return false;
         }
     }
@@ -204,7 +204,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"会话列表不可用：{ex.Message}";
+            Status = $"Conversation list unavailable: {ex.Message}";
             return null;
         }
     }
@@ -219,7 +219,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"历史读取失败：{ex.Message}";
+            Status = $"Failed to read history: {ex.Message}";
             return [];
         }
     }
@@ -234,7 +234,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"统计读取失败：{ex.Message}";
+            Status = $"Failed to read stats: {ex.Message}";
             return null;
         }
     }
@@ -248,7 +248,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"模型列表不可用：{ex.Message}";
+            Status = $"Model list unavailable: {ex.Message}";
             return [];
         }
     }
@@ -262,7 +262,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"权限目录不可用：{ex.Message}";
+            Status = $"Permission catalog unavailable: {ex.Message}";
             return null;
         }
     }
@@ -279,7 +279,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"权限读取失败：{ex.Message}";
+            Status = $"Failed to read permissions: {ex.Message}";
             return null;
         }
     }
@@ -296,7 +296,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"切换权限失败：{ex.Message}";
+            Status = $"Failed to switch permission: {ex.Message}";
             return null;
         }
     }
@@ -309,12 +309,12 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             var childId = await DshBridgeHttpClient
                 .ForkSessionAsync(Bridge, sessionId, atSeq, CancellationToken.None)
                 .ConfigureAwait(false);
-            if (childId is null) Status = "分支失败：内核未返回子会话";
+            if (childId is null) Status = "Branch failed: the kernel did not return a child session";
             return childId;
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"分支失败：{ex.Message}";
+            Status = $"Branch failed: {ex.Message}";
             return null;
         }
     }
@@ -330,7 +330,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException or JsonException)
         {
-            Status = $"凭据写入失败：{ex.Message}";
+            Status = $"Failed to write credentials: {ex.Message}";
             return false;
         }
     }
@@ -349,7 +349,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is TimeoutException or InvalidOperationException or KeyNotFoundException or JsonException)
         {
-            Status = $"prompt 失败：{ex.Message}";
+            Status = $"Prompt failed: {ex.Message}";
             return null;
         }
     }
@@ -410,7 +410,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Status = $"删除会话失败：{ex.Message}";
+            Status = $"Failed to delete the conversation: {ex.Message}";
             return false;
         }
     }
@@ -428,7 +428,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         using var reg = cts.Token.Register(() =>
         {
             _pending.TryRemove(id, out _);
-            tcs.TrySetException(new TimeoutException($"{method} 超时"));
+            tcs.TrySetException(new TimeoutException($"{method} timed out"));
         });
         return await tcs.Task.ConfigureAwait(false);
     }
@@ -436,7 +436,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     private void Write(string line)
     {
         var stdin = _process?.StandardInput;
-        if (stdin is null) throw new InvalidOperationException("runtime 未运行");
+        if (stdin is null) throw new InvalidOperationException("Runtime is not running");
         lock (_writeGate)
         {
             stdin.WriteLine(line);
@@ -667,12 +667,12 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
                                 && error.TryGetProperty("message", out var errorMessage)
                                 ? errorMessage.GetString()
                                 : error.ToString();
-                            tcs.TrySetException(new InvalidOperationException(message ?? "内核请求失败"));
+                            tcs.TrySetException(new InvalidOperationException(message ?? "Kernel request failed"));
                         }
                         else if (Prop(root, "result", out var result))
                             tcs.TrySetResult(result.Clone());
                         else
-                            tcs.TrySetException(new InvalidOperationException("响应缺少 result"));
+                            tcs.TrySetException(new InvalidOperationException("Response is missing result"));
                     }
                 }
                 else if (hasId && hasMethod)
@@ -760,7 +760,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     private void FailPending()
     {
         foreach (var (_, tcs) in _pending)
-            tcs.TrySetException(new InvalidOperationException("runtime 连接中断"));
+            tcs.TrySetException(new InvalidOperationException("Runtime connection was interrupted"));
         _pending.Clear();
     }
 
@@ -817,6 +817,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             insert.Add($"        pipeName: {YamlString(rvm.PipeName)}");
             insert.Add($"        sessionId: {YamlString(rvm.SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
             insert.Add($"        workspaceRoot: {YamlString(rvm.WorkspaceRoot)}");
+            insert.Add($"        hostWorkspaceRoot: {YamlString(rvm.HostWorkspaceRoot)}");
         }
 
         var lines = new List<string>();

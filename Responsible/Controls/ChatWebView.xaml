@@ -18,7 +18,7 @@
                 <ui:SymbolIcon Symbol="Sparkle24" FontSize="36"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                <TextBlock Text="Make a response"
+                <TextBlock Text="{DynamicResource L.Chat.Empty}"
                            Margin="0,14,0,0"
                            FontSize="22"
                            FontWeight="SemiBold"
@@ -33,7 +33,7 @@
                                  IsIndeterminate="True"
                                  HorizontalAlignment="Center"
                                  Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                <TextBlock Text="正在加载会话…"
+                <TextBlock Text="{DynamicResource L.Common.Loading}"
                            Margin="0,14,0,0"
                            FontSize="13.5"
                            HorizontalAlignment="Center"

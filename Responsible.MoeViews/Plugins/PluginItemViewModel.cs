@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Messaging;
 
 namespace Responsible.MoeViews.Plugins;
 
@@ -34,6 +35,11 @@ public sealed partial class PluginItemViewModel : ObservableObject
         Title = info.Title;
         Description = info.Description;
         Update(info);
+        WeakReferenceMessenger.Default.Register<MoeLanguageChangedMessage>(this, (_, _) =>
+        {
+            OnPropertyChanged(nameof(StatusText));
+            OnPropertyChanged(nameof(PendingText));
+        });
     }
 
     public string EntryId { get; }
@@ -54,12 +60,12 @@ public sealed partial class PluginItemViewModel : ObservableObject
 
     public string StatusText => Status switch
     {
-        PluginRuntimeStatus.Active => "运行中",
-        PluginRuntimeStatus.Failed => "加载失败",
-        _ => "已停用",
+        PluginRuntimeStatus.Active => MoeText.Get("L.Plugins.StatusActive"),
+        PluginRuntimeStatus.Failed => MoeText.Get("L.Plugins.StatusFailed"),
+        _ => MoeText.Get("L.Plugins.StatusOff"),
     };
 
-    public string PendingText => "待重启";
+    public string PendingText => MoeText.Get("L.Plugins.PendingBadge");
 
     internal void Update(MoePluginInfo info)
     {

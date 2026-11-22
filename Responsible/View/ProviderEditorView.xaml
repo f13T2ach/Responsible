@@ -21,11 +21,11 @@
             <StackPanel>
                 <TabControl Style="{StaticResource SegmentedTabControlStyle}"
                             SelectedIndex="{Binding ModeIndex}">
-                    <TabItem Header="第三方模型提供商">
+                    <TabItem Header="{DynamicResource L.Provider.TabCatalog}">
                         <StackPanel Margin="0,16,8,0">
                             <TextBlock Style="{StaticResource FieldDescriptionStyle}"
-                                       Text="从内置目录中选择 OpenAI、Anthropic、Kimi 等提供商，填入其 API 密钥即可使用。" />
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="提供商" />
+                                       Text="{DynamicResource L.Provider.CatalogDesc}" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Provider.Provider}" />
                             <ComboBox Width="340"
                                       HorizontalAlignment="Left"
                                       FontSize="13"
@@ -33,7 +33,7 @@
                                       SelectedItem="{Binding SelectedCatalogEntry}"
                                       DisplayMemberPath="DisplayName" />
                             <StackPanel Orientation="Horizontal" Margin="0,16,0,6">
-                                <TextBlock Text="API 密钥"
+                                <TextBlock Text="{DynamicResource L.Provider.ApiKey}"
                                            FontSize="13"
                                            FontWeight="SemiBold"
                                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -42,7 +42,7 @@
                                                Margin="6,0,0,0"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                               ToolTip="留空时使用环境变量中的凭据" />
+                                               ToolTip="{DynamicResource L.Provider.ApiKeyTip}" />
                             </StackPanel>
                             <controls:PlaceholderTextBox Text="{Binding ApiKey, UpdateSourceTrigger=PropertyChanged}"
                                                          Placeholder="{Binding EnvKeyPlaceholder}" />
@@ -52,32 +52,32 @@
                             <Separator Margin="0,16" Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
                             <Expander Style="{StaticResource MoeDialogExpanderStyle}"
                                       IsExpanded="True"
-                                      Header="自定义设置">
+                                      Header="{DynamicResource L.Provider.CustomSettings}">
                                 <StackPanel Margin="0,10,0,0">
-                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,6" Text="API 地址" />
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Margin="0,0,0,6" Text="{DynamicResource L.Provider.BaseUrl}" />
                                     <controls:PlaceholderTextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}"
-                                                                 Placeholder="由提供方配置地址" />
+                                                                 Placeholder="{DynamicResource L.Provider.BaseUrlPlaceholder}" />
                                     <TextBlock Style="{StaticResource FieldHintStyle}" Text="{Binding RegionsHint}" />
                                 </StackPanel>
                             </Expander>
                         </StackPanel>
                     </TabItem>
-                    <TabItem Header="自定义模型 API">
+                    <TabItem Header="{DynamicResource L.Provider.TabCustom}">
                         <StackPanel Margin="0,16,8,0">
                             <TextBlock Style="{StaticResource FieldDescriptionStyle}"
-                                       Text="连接中转站、自部署服务或其他兼容 OpenAI / Anthropic 协议的接口，需填写 API 地址、协议和模型。" />
+                                       Text="{DynamicResource L.Provider.CustomDesc}" />
                             <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Provider ID" />
                             <controls:PlaceholderTextBox Text="{Binding ProviderId, UpdateSourceTrigger=PropertyChanged}"
                                                          Placeholder="acme-gateway" />
                             <TextBlock Style="{StaticResource FieldHintStyle}"
-                                       Text="以小写字母开头的标识，在请求中唯一标识该提供商，并用于派生凭据名。" />
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="显示名称" />
+                                       Text="{DynamicResource L.Provider.ProviderIdHint}" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Provider.DisplayName}" />
                             <controls:PlaceholderTextBox Text="{Binding DisplayName, UpdateSourceTrigger=PropertyChanged}"
-                                                         Placeholder="显示名称" />
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="API 地址" />
+                                                         Placeholder="{DynamicResource L.Provider.DisplayNamePlaceholder}" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Provider.BaseUrl}" />
                             <controls:PlaceholderTextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}"
                                                          Placeholder="https://gateway.example/v1" />
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="API 协议" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Provider.Protocol}" />
                             <ComboBox Width="340"
                                       HorizontalAlignment="Left"
                                       FontSize="13"
@@ -85,9 +85,9 @@
                                 <sys:String>OpenAI Chat Completions</sys:String>
                                 <sys:String>Anthropic Messages</sys:String>
                             </ComboBox>
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="API 密钥" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Provider.ApiKey}" />
                             <controls:PlaceholderTextBox Text="{Binding ApiKey, UpdateSourceTrigger=PropertyChanged}"
-                                                         Placeholder="输入 API 密钥" />
+                                                         Placeholder="{DynamicResource L.Provider.ApiKeyPlaceholder}" />
                         </StackPanel>
                     </TabItem>
                 </TabControl>
@@ -97,13 +97,13 @@
                     <Separator Margin="0,0,0,16" Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
                     <DockPanel Margin="0,0,0,6">
                         <ui:Button DockPanel.Dock="Right"
-                                   Content="获取可用模型"
+                                   Content="{DynamicResource L.Provider.FetchModels}"
                                    Style="{StaticResource MoeFlatButtonStyle}"
                                    FontSize="12.5"
                                    Padding="8,4"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    Command="{Binding FetchModelsCommand}" />
-                        <TextBlock Text="模型目录"
+                        <TextBlock Text="{DynamicResource L.Provider.Catalog}"
                                    FontSize="13.5"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -127,7 +127,7 @@
                                                    Margin="6,0,0,0"
                                                    Command="{Binding DataContext.RemoveModelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                    CommandParameter="{Binding}"
-                                                   ToolTip="移除模型" />
+                                                   ToolTip="{DynamicResource L.Provider.RemoveModel}" />
                                         <TextBox Style="{StaticResource MoeInputTextBoxStyle}"
                                                  FontSize="13"
                                                  Text="{Binding Id, UpdateSourceTrigger=PropertyChanged}" />
@@ -143,14 +143,14 @@
                                    StrokeDashArray="5 4"
                                    RadiusX="10"
                                    RadiusY="10" />
-                        <TextBlock Text="模型选择器中将不显示任何模型；目录外 ID 仍可直接发送。"
+                        <TextBlock Text="{DynamicResource L.Provider.EmptyModels}"
                                    FontSize="12.5"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                     </Grid>
 
-                    <ui:Button Content="添加模型"
+                    <ui:Button Content="{DynamicResource L.Provider.AddModel}"
                                Appearance="Secondary"
                                FontSize="12.5"
                                Padding="12,5"
@@ -166,12 +166,12 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,16,0,0">
-            <ui:Button Content="取消"
+            <ui:Button Content="{DynamicResource L.Common.Cancel}"
                        Appearance="Secondary"
                        FontSize="13"
                        Padding="20,8"
                        Command="{Binding CancelCommand}" />
-            <ui:Button Content="保存"
+            <ui:Button Content="{DynamicResource L.Common.Save}"
                        Style="{StaticResource ConfirmButtonStyle}"
                        FontSize="13"
                        Padding="20,8"

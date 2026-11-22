@@ -109,7 +109,7 @@
                                        FontSize="14"
                                        HorizontalAlignment="Right"
                                        VerticalAlignment="Center"
-                                       ToolTip="受宿主保护，无法停用"
+                                       ToolTip="{DynamicResource L.Plugins.Locked}"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                        Visibility="{Binding CanToggle, Converter={StaticResource BoolToVisibility}, ConverterParameter=Invert}" />
                         <TextBlock Text="{Binding StatusText}"
@@ -155,22 +155,22 @@
                        Style="{StaticResource PluginIconButtonStyle}"
                        Icon="{ui:SymbolIcon Symbol=ChevronLeft24}"
                        Command="{Binding CloseCommand}"
-                       ToolTip="返回对话"
+                       ToolTip="{DynamicResource L.Plugins.Back}"
                        VerticalAlignment="Center" />
 
             <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="插件"
+                <TextBlock Text="{DynamicResource L.Plugins.Title}"
                            FontSize="18"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                <TextBlock Text="管理 DSH 内核插件；启用或停用会在重启内核后生效。"
+                <TextBlock Text="{DynamicResource L.Plugins.Subtitle}"
                            Margin="0,3,0,0"
                            FontSize="12"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:Button Content="重启内核"
+                <ui:Button Content="{DynamicResource L.Plugins.Restart}"
                            Appearance="Secondary"
                            FontSize="12.5"
                            Padding="12,6"
@@ -182,14 +182,14 @@
                            Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
                            Margin="8,0,0,0"
                            Command="{Binding RefreshCommand}"
-                           ToolTip="刷新插件列表" />
+                           ToolTip="{DynamicResource L.Plugins.Refresh}" />
             </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1" Margin="0,16,0,0">
             <ui:TextBox Width="340"
                         HorizontalAlignment="Left"
-                        PlaceholderText="搜索插件名称或模块"
+                        PlaceholderText="{DynamicResource L.Plugins.Search}"
                         Icon="{ui:SymbolIcon Symbol=Search24}"
                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -249,11 +249,11 @@
                 <StackPanel>
                     <StackPanel Visibility="{Binding HasUserPlugins, Converter={StaticResource BoolToVisibility}}">
                         <StackPanel Orientation="Horizontal" Margin="2,4,0,8">
-                            <TextBlock Text="用户插件" Style="{StaticResource PluginSectionHeaderStyle}" />
+                            <TextBlock Text="{DynamicResource L.Plugins.User}" Style="{StaticResource PluginSectionHeaderStyle}" />
                             <TextBlock Text="{Binding UserCount, StringFormat=· {0}}"
                                        Margin="6,0,0,0"
                                        Style="{StaticResource PluginSectionHeaderStyle}" />
-                            <TextBlock Text="来自 RDshPlugins 或第三方包"
+                            <TextBlock Text="{DynamicResource L.Plugins.UserSource}"
                                        Margin="10,0,0,0"
                                        FontSize="11"
                                        VerticalAlignment="Center"
@@ -266,11 +266,11 @@
                     <StackPanel Margin="0,14,0,0"
                                 Visibility="{Binding HasBuiltInPlugins, Converter={StaticResource BoolToVisibility}}">
                         <StackPanel Orientation="Horizontal" Margin="2,4,0,8">
-                            <TextBlock Text="DSH 内置" Style="{StaticResource PluginSectionHeaderStyle}" />
+                            <TextBlock Text="{DynamicResource L.Plugins.BuiltIn}" Style="{StaticResource PluginSectionHeaderStyle}" />
                             <TextBlock Text="{Binding BuiltInCount, StringFormat=· {0}}"
                                        Margin="6,0,0,0"
                                        Style="{StaticResource PluginSectionHeaderStyle}" />
-                            <TextBlock Text="随 DSH 内核发布"
+                            <TextBlock Text="{DynamicResource L.Plugins.BuiltInSource}"
                                        Margin="10,0,0,0"
                                        FontSize="11"
                                        VerticalAlignment="Center"
@@ -289,12 +289,12 @@
                                FontSize="34"
                                HorizontalAlignment="Center"
                                Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                <TextBlock Text="没有找到插件"
+                <TextBlock Text="{DynamicResource L.Plugins.Empty}"
                            Margin="0,12,0,0"
                            FontSize="14"
                            HorizontalAlignment="Center"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <TextBlock Text="插件来自 DSH 内置包与 RDshPlugins 目录；启动内核后可读取实时状态。"
+                <TextBlock Text="{DynamicResource L.Plugins.EmptyHint}"
                            Margin="0,4,0,0"
                            FontSize="11.5"
                            HorizontalAlignment="Center"

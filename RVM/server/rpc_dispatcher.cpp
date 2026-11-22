@@ -324,6 +324,31 @@ core::Result<DispatchResult> RpcDispatcher::Handle(std::span<const std::uint8_t>
       response.mutable_empty();
       return ResponseResult(std::move(response));
     }
+    case v1::RpcRequest::kWorkspaceDiff: {
+      if (sessions_ == nullptr) return ErrorResult(request_id, UnsupportedRequest(engine_));
+      auto diff = sessions_->DiffWorkspace(rpc.workspace_diff().session_id());
+      if (!diff.ok()) return ErrorResult(request_id, diff.error());
+      v1::RpcResponse response = BaseResponse(request_id);
+      *response.mutable_workspace_diff() = diff.Take();
+      return ResponseResult(std::move(response));
+    }
+    case v1::RpcRequest::kWorkspaceApply: {
+      if (sessions_ == nullptr) return ErrorResult(request_id, UnsupportedRequest(engine_));
+      auto applied = sessions_->ApplyWorkspace(rpc.workspace_apply());
+      if (!applied.ok()) return ErrorResult(request_id, applied.error());
+      v1::RpcResponse response = BaseResponse(request_id);
+      *response.mutable_workspace_apply() = applied.Take();
+      return ResponseResult(std::move(response));
+    }
+    case v1::RpcRequest::kWorkspaceRollback: {
+      if (sessions_ == nullptr) return ErrorResult(request_id, UnsupportedRequest(engine_));
+      const core::Status rolled =
+          sessions_->RollbackWorkspace(rpc.workspace_rollback().session_id());
+      if (!rolled.ok()) return ErrorResult(request_id, rolled.error());
+      v1::RpcResponse response = BaseResponse(request_id);
+      response.mutable_workspace_rollback()->set_rolled_back(true);
+      return ResponseResult(std::move(response));
+    }
     case v1::RpcRequest::kShellKill:
       return ErrorResult(request_id, core::NotImplemented(
                                          "shell_kill is not implemented; cancel by closing "

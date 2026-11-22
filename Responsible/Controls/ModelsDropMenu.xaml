@@ -16,10 +16,15 @@
                    FontSize="12.5"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                    Click="OnTriggerClick"
-                   ToolTip="模型供应商">
+                   ToolTip="{DynamicResource L.Models.Provider}">
             <StackPanel Orientation="Horizontal">
-                <TextBlock Text="{Binding SelectedItem.DisplayName, ElementName=Root, TargetNullValue=选择模型, FallbackValue=选择模型}"
-                           VerticalAlignment="Center" />
+                <Grid VerticalAlignment="Center">
+                    <TextBlock Text="{Binding SelectedItem.DisplayName, ElementName=Root}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{DynamicResource L.Models.Select}"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding SelectedItem.DisplayName, ElementName=Root, Converter={StaticResource EmptyStringToVisibilityConverter}}" />
+                </Grid>
                 <ui:SymbolIcon x:Name="Chevron"
                                Symbol="ChevronDown24"
                                FontSize="12"
@@ -54,7 +59,7 @@
                 <DockPanel>
                     <controls:PlaceholderTextBox x:Name="SearchBox"
                                                  DockPanel.Dock="Top"
-                                                 Placeholder="搜索模型..."
+                                                 Placeholder="{DynamicResource L.Models.Search}"
                                                  InputStyle="{StaticResource MoeInputTextBoxStyle}"
                                                  PlaceholderMargin="8,0"
                                                  Margin="6,6,6,4"
@@ -92,7 +97,7 @@
                             </ListBox.ItemTemplate>
                         </ListBox>
                         <TextBlock x:Name="NoMatches"
-                                   Text="无匹配模型"
+                                   Text="{DynamicResource L.Models.NoMatch}"
                                    FontSize="12.5"
                                    Margin="12,8"
                                    Visibility="Collapsed"

@@ -42,6 +42,10 @@ message CreateSessionRequest {
   // persistent ACL grant; the engine only verifies it against the user's
   // authorized list and adds the capability to child tokens.
   repeated ToolAccess tool_access = 14;
+  // Host serial devices the user exposed to this session (COM port names).
+  // The engine grants the sandbox identity access to exactly these devices and
+  // revokes it when the session stops; all other devices stay masked.
+  repeated string device_paths = 15;
 }
 
 message ToolAccess {

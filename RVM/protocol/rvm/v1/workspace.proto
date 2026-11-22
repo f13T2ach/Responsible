@@ -27,6 +27,11 @@ message DiffRequest {
 
 message DiffResponse {
   repeated FileChange changes = 1;
+  // Entries whose host file also changed after the baseline. Applying them
+  // would overwrite host work, so Sync skips them unless the user resolves them.
+  repeated SyncConflict conflicts = 2;
+  // The archive walk stopped at its file/time budget before listing everything.
+  bool truncated = 3;
 }
 
 message SyncConflict {

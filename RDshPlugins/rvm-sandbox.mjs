@@ -1,12 +1,14 @@
 // RVM 沙箱提供者：替换 DSH 自带的 same-world sandbox 服务，把 shell 子进程包进
 // `RvmEngine.exe --shell-bridge`，由引擎在自己的 AppContainer 会话里执行。
 //
-// 真实边界（如实上报）：shell 进程受内核 ACL/AppContainer 约束；fs_* 工具在宿主进程里
-// 运行，靠本插件对 ctx.fs.resolve 的包含性检查把目标限制在工作区内（策略检查，不是内核
-// 边界），因此 enforcement 仍为 partial，不伪造 full。
+// 受保护工作区跑在会话盘上（引擎按 git 索引把源码选择性快照到 RVM 存储，再用 subst 映射成盘符），
+// 宿主工作区目录不会授权给沙箱。shell 由引擎在会话盘里执行；fs_* 工具在宿主进程里运行，
+// 本插件把对宿主工作区的解析改写到会话盘，并拒绝两者之外的路径。fs 侧仍是策略检查而非
+// 内核边界，因此 enforcement 保持 partial，不伪造 full。
 import { existsSync } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { resolve, sep } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { promptSections } from './prompts.mjs'
 
 export const name = 'rvm-sandbox'
@@ -49,7 +51,10 @@ export async function apply(ctx, config = {}) {
   const sessionId = typeof sessionRaw === 'string' && /^[1-9][0-9]{0,19}$/.test(sessionRaw)
     ? sessionRaw
     : undefined
+  // workspaceRoot is the mounted session disk; hostWorkspaceRoot is the real
+  // workspace the model must not reach.
   const workspaceRoot = requiredString(config, 'workspaceRoot')
+  const hostWorkspaceRoot = requiredString(config, 'hostWorkspaceRoot') ?? workspaceRoot
 
   function failClosed(mode, detail) {
     return new SandboxUnavailableError(mode, detail)
@@ -69,13 +74,17 @@ export async function apply(ctx, config = {}) {
         throw failClosed(policy.mode, 'RvmEngine.exe was not found')
       if (pipeName === undefined || sessionId === undefined)
         throw failClosed(policy.mode, 'no live RVM session was configured for this workspace')
-      if (workspaceRoot === undefined)
+      if (workspaceRoot === undefined || hostWorkspaceRoot === undefined)
         throw failClosed(policy.mode, 'no RVM workspace root was configured')
-      if (normalizeRoot(policy.workspaceRoot) !== normalizeRoot(workspaceRoot))
+      if (normalizeRoot(policy.workspaceRoot) !== normalizeRoot(hostWorkspaceRoot)
+          && normalizeRoot(policy.workspaceRoot) !== normalizeRoot(workspaceRoot))
         throw failClosed(
           policy.mode,
-          `workspace mismatch: the shell runs in ${policy.workspaceRoot} but the RVM session covers ${workspaceRoot}`)
-      if (!process.env.RESPONSIBLE_RVM_TOKEN)
+          `workspace mismatch: the shell runs in ${policy.workspaceRoot} but the RVM session covers ${hostWorkspaceRoot}`)
+      // The DSH shell seam spawns with a freshly built environment, so the
+      // bridge cannot inherit this token; hand it over explicitly instead.
+      const token = process.env.RESPONSIBLE_RVM_TOKEN
+      if (!token)
         throw failClosed(policy.mode, 'RESPONSIBLE_RVM_TOKEN is missing from the kernel environment')
 
       return {
@@ -84,6 +93,7 @@ export async function apply(ctx, config = {}) {
           '--shell-bridge',
           '--pipe', pipeName,
           '--session', sessionId,
+          '--token', token,
           '--',
           ...argv,
         ],
@@ -116,18 +126,72 @@ export async function apply(ctx, config = {}) {
   })
 
   // One choke point: every fs tool target is resolved through ctx.fs.resolve.
+  // A path inside the host workspace is rewritten to the same relative path on
+  // the mounted session disk; anything outside both roots is refused.
   if (workspaceRoot !== undefined && ctx.fs !== undefined) {
     const fs = ctx.fs
-    const root = normalizeRoot(workspaceRoot)
+    const guestRoot = normalizeRoot(workspaceRoot)
+    const hostRoot = normalizeRoot(hostWorkspaceRoot)
+    // fs-local derives targetKey from realpath, which is how a junction inside
+    // either tree gets noticed; the drive spelling itself is not canonicalized.
+    const guestRealRoot = await canonicalRoot(workspaceRoot)
+    const hostRealRoot = await canonicalRoot(hostWorkspaceRoot)
     const originalResolve = fs.resolve.bind(fs)
+
+    async function canonicalRoot(root) {
+      if (root === undefined) return undefined
+      try {
+        return normalizeRoot(await realpath(root))
+      } catch {
+        return undefined
+      }
+    }
+
+    function mapTarget(target, requested) {
+      const shown = typeof target?.displayPath === 'string' ? target.displayPath : ''
+      const real = typeof target?.targetKey === 'string' ? target.targetKey : ''
+
+      // The model addressed the session disk directly. A realpath outside the
+      // disk means a junction was planted inside it; never follow host data.
+      if (isInsideRoot(guestRoot, shown)) {
+        if (real !== '' && normalizeRoot(real) !== normalizeRoot(shown)) {
+          // An unresolved canonical root must fail closed: without it there is
+          // no way to prove the link target still lives on the session disk.
+          if (guestRealRoot === undefined || !isInsideRoot(guestRealRoot, real))
+            throw new Error(
+              `RVM sandbox: "${shown}" is a link that resolves outside the session disk`)
+        }
+        return target
+      }
+
+      // Host-tree aliases (pnpm junctions, symlinked workspace paths) resolve
+      // to their real location; map that suffix so the clone's own copy is used.
+      let rel
+      if (real !== '') {
+        if (hostRealRoot !== undefined && isInsideRoot(hostRealRoot, real))
+          rel = relative(hostRealRoot, real)
+        else if (isInsideRoot(hostRoot, real))
+          rel = relative(hostWorkspaceRoot, real)
+      }
+      const lexical = isInsideRoot(hostRoot, shown)
+      if (rel === undefined && lexical) rel = relative(hostWorkspaceRoot, shown)
+      if (rel === undefined)
+        throw new Error(
+          `RVM sandbox: "${shown || requested}" is outside the workspace ${workspaceRoot}`)
+
+      const mapped = rel === '' || rel === '.'
+        ? resolve(workspaceRoot)
+        : join(workspaceRoot, rel)
+      const shownRel = lexical ? relative(hostWorkspaceRoot, shown) : ''
+      const display = shownRel === ''
+        ? mapped
+        : join(workspaceRoot, shownRel)
+      return { targetKey: mapped, displayPath: display }
+    }
+
     fs.resolve = async (path, opts) => {
       const target = await originalResolve(path, opts)
-      const host = target?.targetKey ?? target?.displayPath
-      if (!isInsideRoot(root, host)) {
-        throw new Error(
-          `RVM sandbox: "${target?.displayPath ?? path}" is outside the workspace ${workspaceRoot}`)
-      }
-      return target
+      return mapTarget(target, path)
     }
   }
 }

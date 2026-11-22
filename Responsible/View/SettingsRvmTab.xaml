@@ -1,0 +1,579 @@
+<UserControl x:Class="Responsible.View.SettingsRvmTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:Responsible.ViewModel"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:SettingsViewModel}"
+             d:DesignHeight="640" d:DesignWidth="900">
+    <StackPanel Margin="0,4,8,0">
+        <TextBlock Text="{DynamicResource L.Rvm.Title}"
+                   FontSize="17"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+        <TextBlock Text="{DynamicResource L.Rvm.Subtitle}"
+                   FontSize="12.5"
+                   Margin="0,6,0,14"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+        <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12">
+            <StackPanel>
+                <TextBlock Text="{DynamicResource L.Rvm.SessionDiskTitle}"
+                           FontSize="14.5"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <TextBlock Text="{DynamicResource L.Rvm.SessionDiskDesc}"
+                           FontSize="12"
+                           Margin="0,4,0,12"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ui:SymbolIcon Grid.Column="0"
+                                   Symbol="HardDrive24"
+                                   FontSize="16"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock FontSize="13"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                            <Run Text="{DynamicResource L.Rvm.Status}" />
+                            <Run Text="{Binding WinFspStatusText, Mode=OneWay}" />
+                        </TextBlock>
+                        <TextBlock Text="{DynamicResource L.Rvm.WinFspDiag}"
+                                   FontSize="11.5"
+                                   Margin="0,2,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.WinFspInstalling}"
+                                   FontSize="11.5"
+                                   Margin="0,4,0,0"
+                                   Visibility="{Binding IsWinFspBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <ui:Button Content="{Binding WinFspInstallerText}"
+                                   Appearance="Secondary"
+                                   FontSize="12.5"
+                                   Padding="12,6"
+                                   Command="{Binding InstallWinFspCommand}"
+                                   IsEnabled="{Binding IsWinFspNotBusy}" />
+                        <ui:Button Style="{StaticResource MoeToolbarIconButtonStyle}"
+                                   Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                                   Margin="8,0,0,0"
+                                   ToolTip="{DynamicResource L.Rvm.RecheckWinFsp}"
+                                   Command="{Binding RefreshWinFspCommand}"
+                                   IsEnabled="{Binding IsWinFspNotBusy}" />
+                    </StackPanel>
+                </Grid>
+
+                <Separator Margin="0,12,0,10"
+                           Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               Text="{DynamicResource L.Rvm.DriveLabel}"
+                               FontSize="13"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <ComboBox Grid.Column="1"
+                              Width="78"
+                              Margin="12,0,0,0"
+                              ItemsSource="{Binding WinFspDriveLetters}"
+                              SelectedItem="{Binding WinFspDriveLetter}"
+                              IsEnabled="{Binding IsWinFspNotBusy}" />
+                    <TextBlock Grid.Column="2"
+                               Text="{DynamicResource L.Rvm.DriveHint}"
+                               FontSize="11.5"
+                               Margin="12,0,0,0"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                </Grid>
+
+                <TextBlock Text="{Binding WinFspError}"
+                           Margin="0,10,0,0"
+                           FontSize="11.5"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding WinFspError, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12" Margin="0,12,0,0"
+                DataContext="{Binding Penetration}">
+            <StackPanel>
+                <TextBlock Text="{DynamicResource L.Rvm.PenetrationTitle}"
+                           FontSize="14.5"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <TextBlock Text="{DynamicResource L.Rvm.PenetrationDesc}"
+                           FontSize="12"
+                           Margin="0,4,0,12"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{DynamicResource L.Rvm.Network}"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.NetworkDesc}"
+                                   FontSize="11.5"
+                                   Margin="0,3,16,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                    <ui:ToggleSwitch Grid.Column="1"
+                                     IsChecked="{Binding NetworkEnabled}"
+                                     VerticalAlignment="Center" />
+                </Grid>
+
+                <Separator Margin="0,12,0,10"
+                           Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{DynamicResource L.Rvm.Devices}"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.DevicesDesc}"
+                                   FontSize="11.5"
+                                   Margin="0,3,16,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                    <ui:ToggleSwitch Grid.Column="1"
+                                     IsChecked="{Binding DevicesEnabled}"
+                                     VerticalAlignment="Center" />
+                </Grid>
+
+                <StackPanel Visibility="{Binding DevicesEnabled, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid Margin="0,10,0,6">
+                        <TextBlock Text="{DynamicResource L.Rvm.SerialPorts}"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <ui:Button HorizontalAlignment="Right"
+                                   Style="{StaticResource MoeToolbarIconButtonStyle}"
+                                   Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                                   ToolTip="{DynamicResource L.Rvm.EnumPorts}"
+                                   Command="{Binding RefreshDevicesCommand}" />
+                    </Grid>
+                    <Border MinHeight="48"
+                            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="6">
+                        <Grid>
+                            <TextBlock Text="{DynamicResource L.Rvm.NoSerial}"
+                                       FontSize="12"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                       Visibility="{Binding HasNoDevices, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <ItemsControl ItemsSource="{Binding Devices}" MaxHeight="132">
+                                <ItemsControl.Template>
+                                    <ControlTemplate TargetType="ItemsControl">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                            <ItemsPresenter />
+                                        </ScrollViewer>
+                                    </ControlTemplate>
+                                </ItemsControl.Template>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox Margin="6,5"
+                                                  IsChecked="{Binding IsSelected}"
+                                                  IsEnabled="{Binding Available}"
+                                                  Content="{Binding DisplayName}"
+                                                  FontSize="12.5" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <TextBlock Text="{Binding StatusText}"
+                           FontSize="11.5"
+                           Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding StatusText, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="{Binding LoadError}"
+                           FontSize="11.5"
+                           Margin="0,6,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding LoadError, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                <TextBlock Text="{DynamicResource L.Rvm.PolicyPath}"
+                           FontSize="11"
+                           Margin="0,8,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12" Margin="0,12,0,0">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{DynamicResource L.Rvm.ArchiveTitle}"
+                                   FontSize="14.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.ArchiveDesc}"
+                                   FontSize="12"
+                                   Margin="0,4,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="1"
+                               Style="{StaticResource MoeToolbarIconButtonStyle}"
+                               Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                               Margin="16,0,0,0"
+                               VerticalAlignment="Top"
+                               ToolTip="{DynamicResource L.Rvm.RecheckSession}"
+                               Command="{Binding RefreshRvmSessionCommand}" />
+                </Grid>
+
+                <Grid Margin="0,12,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ui:SymbolIcon Grid.Column="0"
+                                   Symbol="HardDrive24"
+                                   FontSize="16"
+                                   VerticalAlignment="Top"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                        <TextBlock Text="{Binding RvmSessionStatusText}"
+                                   FontSize="12.5"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.ArchiveBusy}"
+                                   FontSize="11.5"
+                                   Margin="0,4,0,0"
+                                   Visibility="{Binding IsRvmArchiveBusy, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal" Margin="26,10,0,0">
+                    <ui:Button Content="{DynamicResource L.Rvm.Audit}"
+                               Appearance="Secondary"
+                               Icon="{ui:SymbolIcon Symbol=DocumentBulletList24}"
+                               FontSize="12.5"
+                               Padding="12,6"
+                               Command="{Binding AuditRvmArchiveCommand}"
+                               IsEnabled="{Binding CanOperateRvmArchive}" />
+                    <ui:Button Content="{DynamicResource L.Rvm.Sync}"
+                               Appearance="Primary"
+                               Icon="{ui:SymbolIcon Symbol=ArrowDownload24}"
+                               FontSize="12.5"
+                               Padding="12,6"
+                               Margin="8,0,0,0"
+                               Command="{Binding SyncRvmArchiveCommand}"
+                               IsEnabled="{Binding CanOperateRvmArchive}" />
+                    <ui:Button Content="{DynamicResource L.Rvm.Rollback}"
+                               Appearance="Secondary"
+                               Icon="{ui:SymbolIcon Symbol=ArrowUndo24}"
+                               FontSize="12.5"
+                               Padding="12,6"
+                               Margin="8,0,0,0"
+                               Command="{Binding RollbackRvmArchiveCommand}"
+                               IsEnabled="{Binding CanOperateRvmArchive}" />
+                </StackPanel>
+
+                <TextBlock Text="{Binding RvmArchiveStatus}"
+                           FontSize="12"
+                           Margin="26,10,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding RvmArchiveStatus, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                <TextBlock Text="{DynamicResource L.Rvm.ArchiveEmpty}"
+                           FontSize="11.5"
+                           Margin="26,8,0,0"
+                           Visibility="{Binding ShowEmptyRvmArchive, Converter={StaticResource BooleanToVisibilityConverter}}"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+                <ItemsControl ItemsSource="{Binding RvmArchiveChanges}" Margin="0,10,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Padding="10,8"
+                                    Margin="0,0,0,6"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ui:SymbolIcon Grid.Column="0"
+                                                       Symbol="Document24"
+                                                       FontSize="14"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Path}"
+                                                   FontSize="12"
+                                                   Margin="8,0,12,0"
+                                                   VerticalAlignment="Center"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Path}"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding KindText}"
+                                                   FontSize="11.5"
+                                                   Margin="0,0,12,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding SizeText}"
+                                                   FontSize="11"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding ConflictText}"
+                                               FontSize="11"
+                                               Margin="22,4,0,0"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding HasConflict, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                               Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="{Binding RvmArchiveError}"
+                           Margin="26,6,0,0"
+                           FontSize="11.5"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding RvmArchiveError, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+
+                <TextBlock Text="{DynamicResource L.Rvm.ArchivePathHint}"
+                           FontSize="11"
+                           Margin="0,8,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource ProviderCardStyle}" Padding="14,12" Margin="0,12,0,0">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{DynamicResource L.Rvm.AclTitle}"
+                                   FontSize="14.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.AclDesc}"
+                                   FontSize="12"
+                                   Margin="0,4,0,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <ui:Button Grid.Column="1"
+                               Content="{DynamicResource L.Rvm.AddTool}"
+                               Icon="{ui:SymbolIcon Symbol=Add24}"
+                               Appearance="Primary"
+                               FontSize="12.5"
+                               Padding="12,6"
+                               Margin="16,0,0,0"
+                               VerticalAlignment="Top"
+                               Click="OnAddAclTool"
+                               IsEnabled="{Binding IsAclNotBusy}" />
+                </Grid>
+
+                <TextBlock Text="{DynamicResource L.Rvm.NoTools}"
+                           FontSize="12"
+                           Margin="0,12,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding HasNoAclAuthorizations, Converter={StaticResource BooleanToVisibilityConverter}}"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+                <ItemsControl ItemsSource="{Binding AclAuthorizations}" Margin="0,10,0,0">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Padding="10,8"
+                                    Margin="0,0,0,8"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsValid}" Value="False">
+                                                <Setter Property="Opacity" Value="0.6" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ui:SymbolIcon Grid.Column="0"
+                                                       Symbol="Shield24"
+                                                       FontSize="16"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="13"
+                                                       FontWeight="SemiBold"
+                                                       TextTrimming="CharacterEllipsis">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsValid}" Value="False">
+                                                                <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Path}"
+                                                       FontSize="11"
+                                                       Margin="0,2,0,0"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding Path}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsValid}" Value="False">
+                                                                <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <ui:Button Style="{StaticResource MoeToolbarIconButtonStyle}"
+                                                       Icon="{ui:SymbolIcon Symbol=ArrowSync24}"
+                                                       ToolTip="{Binding RetryTip}"
+                                                       Command="{Binding DataContext.RetryAclCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       Visibility="{Binding CanRetry, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            <ui:Button Style="{StaticResource MoeToolbarIconButtonStyle}"
+                                                       Icon="{ui:SymbolIcon Symbol=Delete24}"
+                                                       Margin="6,0,0,0"
+                                                       ToolTip="{DynamicResource L.Rvm.RemoveGrant}"
+                                                       Command="{Binding DataContext.RemoveAclCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                       CommandParameter="{Binding}"
+                                                       IsEnabled="{Binding CanRemove}" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <ProgressBar Height="4"
+                                                 Margin="0,8,0,0"
+                                                 BorderThickness="0"
+                                                 Maximum="100"
+                                                 Value="{Binding ProgressValue}"
+                                                 IsIndeterminate="{Binding IsProgressIndeterminate}"
+                                                 Visibility="{Binding IsProgressVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                 Foreground="{DynamicResource AccentFillColorDefaultBrush}"
+                                                 Background="{DynamicResource ControlStrokeColorDefaultBrush}" />
+
+                                    <TextBlock Text="{Binding StatusText}"
+                                               FontSize="11.5"
+                                               Margin="0,6,0,0"
+                                               TextWrapping="Wrap">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasError}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsValid}" Value="False">
+                                                        <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Error}"
+                                               FontSize="11.5"
+                                               Margin="0,3,0,0"
+                                               TextWrapping="Wrap"
+                                               Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                               Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="{DynamicResource L.Rvm.AclHint1}"
+                           FontSize="11.5"
+                           Margin="0,2,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+                <TextBlock Text="{DynamicResource L.Rvm.AclHint2}"
+                           FontSize="11.5"
+                           Margin="0,2,0,0"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+
+                <TextBlock Text="{Binding AclError}"
+                           Margin="0,8,0,0"
+                           FontSize="11.5"
+                           TextWrapping="Wrap"
+                           Visibility="{Binding AclError, Converter={StaticResource NonEmptyStringToVisibilityConverter}}"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</UserControl>

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.Messaging;
 
 namespace Responsible.MoeViews.Plugins;
 
@@ -22,7 +23,7 @@ public partial class PluginsManagerViewModel : ObservableObject
     private bool _isLoading;
 
     [ObservableProperty]
-    private string _statusText = "正在读取插件…";
+    private string _statusText = MoeText.Get("L.Plugins.Loading");
 
     [ObservableProperty]
     private bool _isLive;
@@ -41,6 +42,11 @@ public partial class PluginsManagerViewModel : ObservableObject
         BuiltInView = new ListCollectionView(_builtInItems) { Filter = IsPluginVisible };
         UserView.SortDescriptions.Add(new SortDescription(nameof(PluginItemViewModel.Title), ListSortDirection.Ascending));
         BuiltInView.SortDescriptions.Add(new SortDescription(nameof(PluginItemViewModel.Title), ListSortDirection.Ascending));
+        WeakReferenceMessenger.Default.Register<MoeLanguageChangedMessage>(this, (_, _) =>
+        {
+            OnPropertyChanged(nameof(PendingText));
+            _ = LoadAsync();
+        });
     }
 
     public ICollectionView UserView { get; }
@@ -63,7 +69,7 @@ public partial class PluginsManagerViewModel : ObservableObject
 
     public bool CanRestartKernel => PendingCount > 0 && !IsLoading;
 
-    public string PendingText => $"有 {PendingCount} 项更改等待重启内核后生效";
+    public string PendingText => MoeText.Format("L.Plugins.Pending", PendingCount);
 
     public async Task LoadAsync()
     {
@@ -78,7 +84,7 @@ public partial class PluginsManagerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            LastMessage = $"读取插件失败：{ex.Message}";
+            LastMessage = $"Failed to load plugins: {ex.Message}";
         }
         finally
         {
@@ -105,7 +111,7 @@ public partial class PluginsManagerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            LastMessage = $"重启内核失败：{ex.Message}";
+            LastMessage = $"Failed to restart the kernel: {ex.Message}";
         }
         finally
         {
@@ -172,13 +178,13 @@ public partial class PluginsManagerViewModel : ObservableObject
             var inventory = await _plugins.SetEnabledAsync(item.ToggleId, enabled);
             Apply(inventory, preserveItems: true);
             LastMessage = inventory.PendingCount > 0
-                ? $"已保存，{inventory.PendingCount} 项更改将在重启内核后生效"
-                : "插件状态已更新";
+                ? MoeText.Format("L.Plugins.Saved", inventory.PendingCount)
+                : MoeText.Get("L.Plugins.SavedSimple");
         }
         catch (Exception ex)
         {
             item.SetIsOnSilently(!enabled);
-            LastMessage = $"切换失败：{ex.Message}";
+            LastMessage = $"Failed to toggle plugin: {ex.Message}";
         }
         finally
         {

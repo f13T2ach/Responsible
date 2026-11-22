@@ -86,6 +86,7 @@ HANDLE ConnectPipe(const std::wstring& pipe_name) {
 
 int RunShellBridge(int argc, wchar_t** argv) {
   std::wstring pipe_name;
+  std::wstring token_arg;
   std::string session_text;
   std::uint32_t timeout_ms = kDefaultTimeoutMs;
   std::vector<std::wstring> command;
@@ -100,6 +101,8 @@ int RunShellBridge(int argc, wchar_t** argv) {
       after_separator = true;
     } else if (arg == L"--pipe" && i + 1 < argc) {
       pipe_name = argv[++i];
+    } else if (arg == L"--token" && i + 1 < argc) {
+      token_arg = argv[++i];
     } else if (arg == L"--session" && i + 1 < argc) {
       session_text = WideToUtf8OrEmpty(argv[++i]);
     } else if (arg == L"--timeout-ms" && i + 1 < argc) {
@@ -122,9 +125,13 @@ int RunShellBridge(int argc, wchar_t** argv) {
     }
     session_id = parsed;
   }
-  const std::wstring token = EnvironmentValue(L"RESPONSIBLE_RVM_TOKEN");
+  // The DSH shell seam rebuilds the child environment from scratch, so the
+  // kernel's RESPONSIBLE_RVM_TOKEN does not reach this process; --token carries
+  // it explicitly. The environment fallback keeps standalone launches working.
+  const std::wstring token =
+      token_arg.empty() ? EnvironmentValue(L"RESPONSIBLE_RVM_TOKEN") : token_arg;
   if (token.empty()) {
-    Report("RESPONSIBLE_RVM_TOKEN is not set");
+    Report("no engine token was provided");
     return kExitUnavailable;
   }
 

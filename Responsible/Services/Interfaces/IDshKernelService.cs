@@ -6,13 +6,15 @@ public sealed record DshApproval(string SessionId, string ToolName, string? Reas
 
 public sealed record DshBridgeInfo(string PipeName, string Token, int Port);
 
-// 内核启动时附带的 RVM 会话：shell 工具改成经 RvmEngine --shell-bridge 在隔离会话里执行
+// 内核启动时附带的 RVM 会话：shell 工具改成经 RvmEngine --shell-bridge 在隔离会话里执行。
+// WorkspaceRoot 是会话盘上的挂载路径，HostWorkspaceRoot 是它对应的工作区宿主目录。
 public sealed record DshRvmBinding(
     string EnginePath,
     string PipeName,
     string Token,
     ulong SessionId,
-    string WorkspaceRoot);
+    string WorkspaceRoot,
+    string HostWorkspaceRoot);
 
 public sealed record DshSessionRow(
     string SessionId,

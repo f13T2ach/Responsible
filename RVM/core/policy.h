@@ -25,8 +25,6 @@ struct SandboxPolicy {
 
 struct EngineConfig {
   std::wstring pipe_name;
-  bool require_vbs = true;
-  bool require_hvci = true;
 };
 
 }  // namespace rvm::core

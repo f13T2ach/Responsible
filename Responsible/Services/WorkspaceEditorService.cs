@@ -35,6 +35,7 @@ public sealed class WorkspaceEditorService(
 
         ContentDialogResult result;
         // 对话框在 WebView2 之上会被 HWND 空域遮住，弹出期间折叠 Web
+        DialogOpenState.IsOpen = true;
         messenger.Send(new DialogOpenChangedMessage(true));
         try
         {
@@ -42,6 +43,7 @@ public sealed class WorkspaceEditorService(
         }
         finally
         {
+            DialogOpenState.IsOpen = false;
             messenger.Send(new DialogOpenChangedMessage(false));
         }
         if (result != ContentDialogResult.Primary)

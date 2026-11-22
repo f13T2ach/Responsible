@@ -96,6 +96,15 @@ std::string TrimAscii(std::string value) {
   return value.substr(start);
 }
 
+// cmd.exe rejects forward slashes in several path arguments (type, del), so a
+// workspace passed as D:/x must reach the probes as D:\x.
+std::wstring NativePath(std::wstring path) {
+  for (wchar_t& ch : path) {
+    if (ch == L'/') ch = L'\\';
+  }
+  return path;
+}
+
 std::wstring ToLower(std::wstring value) {
   for (wchar_t& ch : value) {
     if (ch >= L'A' && ch <= L'Z') ch = static_cast<wchar_t>(ch - L'A' + L'a');
@@ -160,22 +169,26 @@ std::string Combined(const Probe& probe) { return probe.output + probe.error; }
 
 int RunJailbreakSmoke(const JailbreakOptions& options) {
   std::cout << std::unitbuf;
+  const std::wstring workspace_root = NativePath(options.workspace_root);
   std::error_code path_error;
-  if (options.workspace_root.empty() ||
-      !fs::is_directory(options.workspace_root, path_error)) {
+  if (workspace_root.empty() || !fs::is_directory(workspace_root, path_error)) {
     std::cout << "setup=FAIL detail=workspace directory does not exist\n";
     return 2;
   }
 
   runtime::EnvironmentSpec spec;
   spec.session_id = L"jailbreak-smoke";
-  spec.workspace_root = options.workspace_root;
+  spec.workspace_root = workspace_root;
   spec.policy.mode = core::SandboxMode::kWorkspaceWrite;
   spec.policy.approval = core::ApprovalMode::kAsk;
   spec.policy.network_access = false;
-  spec.tool_paths = options.tool_paths;
+  if (!options.overlay_drive.empty()) {
+    spec.overlay_workspace = true;
+    spec.overlay_drive = options.overlay_drive;
+  }
+  for (const std::wstring& tool : options.tool_paths) spec.tool_paths.push_back(NativePath(tool));
 
-  std::wstring python = options.python_exe;
+  std::wstring python = NativePath(options.python_exe);
   if (!python.empty()) {
     const std::wstring parent = fs::path(python).parent_path().wstring();
     if (!parent.empty() &&
@@ -237,7 +250,9 @@ int RunJailbreakSmoke(const JailbreakOptions& options) {
     environment.value()->Stop();
     return 2;
   }
-  const std::wstring parent = fs::path(context.workspace_path).parent_path().wstring();
+  // The sibling canary must live next to the real workspace even when the
+  // session runs on a mounted disk; that parent write is the reported escape.
+  const std::wstring parent = fs::path(spec.workspace_root).parent_path().wstring();
 
   const std::wstring read_temp = JoinPath(host_temp, L"rvm_jailbreak_read" + suffix + L".txt");
   const std::wstring read_profile = JoinPath(profile, L"rvm_jailbreak_read" + suffix + L".txt");
@@ -292,7 +307,7 @@ int RunJailbreakSmoke(const JailbreakOptions& options) {
     const Probe read = Run(context, {L"cmd.exe", L"/c", L"type", inside_workspace});
     check("workspace_write", write.ran && write.exit_code == 0 &&
                                  read.ran && Combined(read).find("RVM_INSIDE_OK") != std::string::npos,
-          Brief(read));
+          "write=" + Brief(write) + " read=" + Brief(read));
   }
   {
     const Probe write =
@@ -300,7 +315,7 @@ int RunJailbreakSmoke(const JailbreakOptions& options) {
     const Probe read = Run(context, {L"cmd.exe", L"/c", L"type", inside_temp_path});
     check("temp_write", write.ran && write.exit_code == 0 &&
                             read.ran && Combined(read).find("RVM_TEMP_OK") != std::string::npos,
-          Brief(read));
+          "write=" + Brief(write) + " read=" + Brief(read));
   }
   {
     const Probe mapped = Run(context, {L"cmd.exe", L"/c", L"echo", L"%TEMP%"});
@@ -401,6 +416,55 @@ int RunJailbreakSmoke(const JailbreakOptions& options) {
                 Combined(probe).find("PY_INSIDE_OK") != std::string::npos,
             Brief(probe));
     }
+  }
+
+  // Host-side tools (the file editor) create files after the session starts;
+  // the inherited workspace grant must let sandboxed shells remove them.
+  // PowerShell and Python reach the delete through different paths, so probe
+  // both, plus a file the sandbox itself created.
+  {
+    const std::wstring host_pwsh =
+        JoinPath(context.workspace_path, L"_rvm_host_pwsh" + suffix + L".txt");
+    const std::wstring host_python =
+        JoinPath(context.workspace_path, L"_rvm_host_python" + suffix + L".txt");
+    const std::wstring sandbox_file =
+        JoinPath(context.workspace_path, L"_rvm_sandbox_pwsh" + suffix + L".txt");
+    const bool seeded = WriteHostFile(host_pwsh, "host") && WriteHostFile(host_python, "host");
+    if (!seeded) {
+      check("host_seed", false, "could not create host-side files in the workspace");
+    } else {
+      const Probe ps = Run(context, {L"powershell.exe", L"-NoProfile", L"-NonInteractive",
+                                     L"-Command",
+                                     L"Remove-Item -LiteralPath '" + host_pwsh +
+                                         L"' -Force; if (Test-Path -LiteralPath '" + host_pwsh +
+                                         L"') { 'RVM_STILL' } else { 'RVM_GONE' }"});
+      check("pwsh_delete_host_file",
+            ps.ran && !HostFileExists(host_pwsh) &&
+                Combined(ps).find("RVM_GONE") != std::string::npos,
+            Brief(ps));
+      if (!python.empty() && HostFileExists(python)) {
+        const Probe py = Run(context, {python, L"-c",
+                                       L"import os; os.remove(" + PyLiteral(host_python) +
+                                           L"); print('RVM_GONE')"});
+        check("python_delete_host_file",
+              py.ran && !HostFileExists(host_python) &&
+                  Combined(py).find("RVM_GONE") != std::string::npos,
+              Brief(py));
+      }
+    }
+    const Probe created = Run(context, {L"cmd.exe", L"/c", L"echo", L"x", L">", sandbox_file});
+    const Probe removed = Run(context, {L"powershell.exe", L"-NoProfile", L"-NonInteractive",
+                                        L"-Command",
+                                        L"Remove-Item -LiteralPath '" + sandbox_file +
+                                            L"' -Force; if (Test-Path -LiteralPath '" +
+                                            sandbox_file + L"') { 'RVM_STILL' } else { 'RVM_GONE' }"});
+    check("pwsh_delete_sandbox_file",
+          created.ran && removed.ran && !HostFileExists(sandbox_file) &&
+              Combined(removed).find("RVM_GONE") != std::string::npos,
+          Brief(removed));
+    DeleteHostFile(host_pwsh);
+    DeleteHostFile(host_python);
+    DeleteHostFile(sandbox_file);
   }
 
   DeleteHostFile(read_temp);

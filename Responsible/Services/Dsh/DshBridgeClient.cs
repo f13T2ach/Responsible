@@ -49,7 +49,7 @@ internal static class DshBridgeClient
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new TimeoutException($"连接插件桥接超时：{last?.Message}");
+        throw new TimeoutException($"Timed out connecting to the plugin bridge: {last?.Message}");
     }
 
     private static async Task<IReadOnlyList<BridgePluginRow>> ListOnceAsync(
@@ -70,12 +70,12 @@ internal static class DshBridgeClient
         var line = await reader.ReadLineAsync(cancellationToken).AsTask()
             .WaitAsync(TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrEmpty(line))
-            throw new IOException("插件桥接没有返回数据");
+            throw new IOException("The plugin bridge returned no data");
 
         var envelope = JsonSerializer.Deserialize<BridgeEnvelope>(line, JsonOptions)
-                       ?? throw new IOException("插件桥接返回了无效 JSON");
+                       ?? throw new IOException("The plugin bridge returned invalid JSON");
         if (!envelope.Ok)
-            throw new IOException(envelope.Error?.Message ?? "插件桥接返回失败");
+            throw new IOException(envelope.Error?.Message ?? "The plugin bridge returned a failure");
         return envelope.Data ?? [];
     }
 }

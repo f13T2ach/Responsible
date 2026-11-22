@@ -78,6 +78,7 @@ message EnvironmentFacts {
   uint32 memory_mb = 4;
   uint32 vcpu_count = 5;
   bool network_enabled = 6;
+  repeated string device_paths = 7;
 }
 
 enum ProbeState {

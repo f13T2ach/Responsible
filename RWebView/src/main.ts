@@ -2,6 +2,7 @@ import { applyPalette, connect, defaultPalette, onMessage, send, type HostMessag
 import { HistoryView, icons } from "./history";
 import { StatsView } from "./stats";
 import { installPreview } from "./preview";
+import { setLocale, t } from "./i18n";
 
 const app = document.getElementById("app")!;
 
@@ -10,18 +11,23 @@ const history = new HistoryView(app);
 
 const empty = document.createElement("div");
 empty.className = "empty";
-empty.innerHTML = `${icons.sparkleBig}<span class="title">Make a response</span>`;
+empty.innerHTML = `${icons.sparkleBig}<span class="title">${t("empty.title")}</span>`;
 app.append(empty);
 
 const loading = document.createElement("div");
 loading.className = "loading";
-loading.innerHTML = `<span class="spinner"></span><span class="title">正在加载会话…</span>`;
+loading.innerHTML = `<span class="spinner"></span><span class="title">${t("loading")}</span>`;
 app.append(loading);
 
 const toast = document.createElement("div");
 toast.className = "toast";
 document.body.append(toast);
 let toastTimer = 0;
+
+function paintChrome(): void {
+  empty.innerHTML = `${icons.sparkleBig}<span class="title">${t("empty.title")}</span>`;
+  loading.innerHTML = `<span class="spinner"></span><span class="title">${t("loading")}</span>`;
+}
 
 function showToast(text: string): void {
   toast.textContent = text;
@@ -64,7 +70,7 @@ function copyText(text: string): void {
   } else if (navigator.clipboard) {
     void navigator.clipboard.writeText(text);
   }
-  showToast("已复制");
+  showToast(t("copied"));
 }
 
 history.onCopyCode = copyText;
@@ -76,7 +82,7 @@ history.onAction = (action, id) => {
   }
   if (action === "branch") {
     if (connected) send({ type: "branch", id });
-    else showToast("浏览器预览：不创建分支");
+    else showToast(t("preview.noBranch"));
     return;
   }
   if (connected) send({ type: action, id });
@@ -85,7 +91,7 @@ history.onAction = (action, id) => {
 
 history.onOpenLink = (href) => {
   if (connected) send({ type: "openLink", href });
-  else showToast("浏览器预览：不打开外部链接");
+  else showToast(t("preview.noLink"));
 };
 
 let previewAction: (action: "stop", id: string) => void = () => {};
@@ -93,6 +99,8 @@ let previewAction: (action: "stop", id: string) => void = () => {};
 onMessage((msg: HostMessage) => {
   switch (msg.type) {
     case "init":
+      setLocale(msg.locale);
+      paintChrome();
       applyPalette(msg.theme, msg.colors);
       lastStats = msg.stats;
       sessionLoading = msg.loading === true;
@@ -103,6 +111,12 @@ onMessage((msg: HostMessage) => {
       break;
     case "theme":
       applyPalette(msg.theme, msg.colors);
+      break;
+    case "locale":
+      setLocale(msg.locale);
+      paintChrome();
+      history.relocalize();
+      stats.relocalize();
       break;
     case "history.reset":
       history.reset(msg.messages);

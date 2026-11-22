@@ -1,10 +1,12 @@
-# Responsible
+<div align="center">
+<h1>Responsible</h1>
 
 试着对模型的每一响应负责。
+</div>
 
 ## 介绍
 
-Responsible 的内核是 Deepseek Harness，通过载入自定插件来重新路由 AI 的指令请求到 Responsible Virtual Machine（RVM），同时支持基于 FUSE 文件系统的工具链穿透、独立工作区来提供安全的 Agent 辅助编程环境，期望任何人和 AI 都无法突破 Responsible 进行隐私读取和中间人攻击。
+Responsible 的内核是 Deepseek Harness，通过载入自定插件来重新路由 AI 的指令请求到 Responsible Virtual Machine（RVM），同时支持基于 AppContainer 的工具链穿透、独立工作区来提供安全的 Agent 辅助编程环境，期望任何人和 AI 都无法突破 Responsible 进行隐私读取和中间人攻击。
 
 Responsible 支持安装专为 Responsible 定制的 DSH 插件（RDsh）来定义含本地配置文件的敏感工具的调用方式（如Git, SSH）
 
@@ -13,10 +15,12 @@ Responsible 支持安装专为 Responsible 定制的 DSH 插件（RDsh）来定�
 Responsible-CLI 跨平台版本正在开发，目前只支持 Windows 版本。
 
 1. 克隆仓库（.Net 10），配置 Nuget 包， 构建编译。或者直接从 Release 下载 Github Workflow 的构建。
-2. 选择“克隆工作区”来进行受保护的工作。
-3. 配置 RVM，引入要穿透的工具链和环境变量。
+2. 在“编辑工作区”中勾选“RVM 隔离保护”，并建立 Git 索引（办公目录选“全面索引（推荐办公）”，代码仓库选“普通索引”）。
+3. 在设置 → RVM 中配置网络与设备穿透；在工作区设置中引入要穿透的工具链和环境变量。
 4. 配置 RDsh 插件，引入 AI 可用的敏感工具。
-5. 开始工作。当一轮工作完成后，可以把 RVM 中工作区的改动 Flush 到本地。
+5. 开始工作。当一轮工作完成后，审计会话盘差异，再 Sync 回宿主、Rollback 会话盘，或用 CLI 的 `--flushback` 同步。
+
+## 构建
 
 ## RDsh 插件
 
@@ -30,24 +34,49 @@ RDsh 插件专为调用敏感工具而生，RDsh 插件的工作方式是接收 
 
 ## RVM 虚拟机
 
+RVM 并不是镜像驱动的虚拟机，它通过访问控制实现了文件隔离，但是没有实现内核隔离。启用内存完整性保护、跟随 Windows 更新是用户自行负责的系统加固事项；RVM 不检查这些设置，也不会因此阻止会话，风险自担。
+
+RVM 在本地有快照档案，能记录 VM 内部的系统配置与工作区快照：系统配置、包存储条目、授权与会话日志记入 `system.json`/`system.log`/`sessions.log`/`audit.log`；系统层本身不可写（AppContainer 没有系统写入通道），Rollback 只还原工作区。
+
 ### RVM 介质
 1. RVM Infrastructure
-RVM 实现了 Windows 的虚拟机，与宿主同系统，提供基础 Powershell, CMD, Winget 等工具
+RVM 不复制、也不链接系统文件。会话基础设施由 AppContainer 身份与逐路径 ACL 授权构成：宿主用户目录、凭据、SSH 与浏览器数据永不授权；只授权会话盘、会话 Temp、用户显式授权的工具目录和串口。系统组件仍由 Windows 按 AppContainer 规则提供，不存在“链接只读系统文件”这层实现。
 2. RVM Workspace
-RVM 实现了 VM 内的工作区，工作区是原工作区的克隆，用户可以在审计后进行 Rollback, Sync 操作。
+RVM 的工作区是 Git 索引快照，不是原工作区的克隆：引擎按工作区的 Git 索引把 tracked 文件与未被忽略的 untracked 文件选择性复制到本地会话盘，依赖目录、构建产物和缓存不进入快照；之后每次启动只增量同步宿主变更，沙箱内的修改保留在会话盘。没有 Git 索引时 RVM 拒绝创建会话，不会退化为扫描整个目录。用户可以在审计差异后执行 Rollback（只还原会话盘）或 Sync（只写回未冲突项）。
 3. RVM Toolchain
-RVM 实现了工具链穿透，AI 能直接调用用户指定的工具但只对 VM 本身造成影响。
+RVM 对用户指定的工具目录做只读/执行授权，AI 调用这些工具时进程仍运行在会话内，输出与副作用落在会话盘；敏感工具的实际调用由 RDsh 插件做凭证代理与审计。
 
-### RVM 实现
-1. RVM Channel
-RVM 内对外部工具链的调用和网络调用都会转发给 Channel。
-4. RVM EnvHook
-RVM 会记录 AI 对环境的修改，用户可以在审计后进行 Rollback, Apply 操作。
-5.
+### RVM Penetrate
+1. RVM 允许你设置 Penetrate Devices：设置 → RVM 只枚举宿主串口（COM）设备，勾选后引擎为该会话的 AppContainer 身份在设备对象安全描述符上添加读写 ACE，停止会话时撤销。设备打不开或授权失败会让会话启动失败，不会伪装成已暴露；未勾选的外设不会被原样穿透。
+2. RVM 允许你设置 Penetrate Network：默认关闭，会话没有任何网络能力。开启后只授予 `internetClient` 出站能力，不授予 `privateNetworkClientServer`，也没有 loopback 豁免。端口遮罩是固定语义：宿主 loopback 端口与会话入站端口互不可见，会话既不能访问宿主服务端口，也不能在遮罩范围内绑定/监听；没有按端口单独放行的配置。网络审计按命令进程树采样宿主 TCP/UDP 表，把新观察到的端点写入会话档案 `network.log`；采样有间隔，极短连接可能漏记。
 
+### RVM CLI
+RVM 是 Server 范式的，给出--create-session <alias> <id> <absolute_path>能创建工作区，当<absolute_path>省略时，创建空头工作区。给出--join <id>，能进入一个类似ssh的CLI，能执行命令。给出--terminate <id>，移除工作区和本地状态档案。给出--flushback <id>，同步工作区内部的更改到本地磁盘。给出--save <id>，保存RVM指定id的状态（含系统状态和工作区状态）。
+
+实现约定：
+
+- 首次调用会自动拉起一个分离的引擎守护进程（不占用当前控制台）；后续命令通过命名管道复用同一引擎与 token。状态保存在 `%LOCALAPPDATA%\Responsible\RVM\cli\`（`engine.ini`、`sessions\<id>.ini`、`workspaces\<id>`），会话档案在 `%LOCALAPPDATA%\Responsible\RVM\cli_<id>\`。
+- `--create-session` 要求 `<absolute_path>` 是一个独立 Git 仓库根：引擎用 `git ls-files` 读取索引来确定快照范围。没有索引时会拒绝创建并提示先 `git init`；办公目录可直接 `git add -A` 建立全面索引，RVM 不会扫描整块磁盘。空头工作区会自动建立空仓库，只有身份和工作日志，没有宿主角落。
+- 网络与设备穿透与设置页共用 `%APPDATA%\Responsible\rvm-policy.json`，在创建会话时固化。
+- `--join` 的 `cd` 只允许会话盘内路径，命令经 `cmd.exe` 在沙箱里执行；`exit`/`quit` 断开但不销毁会话。
+- `--flushback` 先打印审计差异，再同步未冲突项；存在冲突时返回退出码 2，宿主上被修改的文件不会被覆盖。空头工作区没有宿主角落，会提示改用 `--save`。
+- `--terminate` 会先关闭运行中的引擎会话；关闭失败时保留档案，避免会话盘被删后沙箱仍向其写入。
+- `--save` 生成 `<档案>\snapshots\<时间戳>\`：复制 `system.json`、`system.log`、`sessions.log`、`audit.log`、`network.log`、`seed.manifest`、`baseline.manifest`、`clone.ready`，写入 `workspace.manifest`（有上限，超时或超量会标记 truncated）和会话运行时的 `workspace.diff`，不含宿主机扫描，也不复制会话盘本身。
 
 **要了解更多，前往 RVM/README.md**
 
 ## RWebView
 
+RWebView 实现了部分可视化页面。
+
 **要了解更多，前往 RWebView/README.md**
+
+## 贡献指南
+
+**要了解更多，前往 ./CONTRIBUTE.md**
+
+## 开源和免责声明
+
+开源许可协议：MIT
+
+免责声明：选择 Responsible ，说明你认为此解决方案的强度和潜在风险能够接受和承受。除 MIT 协议要求的责任免除之外，Responsible 还不对任何包括但不限于 0day 漏洞、技术缺陷等原因造成的损失承担责任。Responsible 本身不提供任何 AI 计算供应商服务。

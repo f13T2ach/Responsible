@@ -219,9 +219,9 @@ internal static class DshBridgeHttpClient
                 var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                     throw new BridgeRequestException(
-                        ErrorMessage(text) ?? $"桥接接口返回 {(int)response.StatusCode}");
+                        ErrorMessage(text) ?? $"Bridge endpoint returned {(int)response.StatusCode}");
                 return JsonSerializer.Deserialize<T>(text, JsonOptions)
-                       ?? throw new IOException("桥接接口返回了空响应");
+                       ?? throw new IOException("The bridge endpoint returned an empty response");
             }
             catch (BridgeRequestException)
             {
@@ -239,7 +239,7 @@ internal static class DshBridgeHttpClient
             await Task.Delay(250, cancellationToken).ConfigureAwait(false);
         }
 
-        throw new TimeoutException($"连接 DSH 端口桥接超时：{last?.Message}");
+        throw new TimeoutException($"Timed out connecting to the DSH port bridge: {last?.Message}");
     }
 
     private sealed class BridgeRequestException(string message) : IOException(message);

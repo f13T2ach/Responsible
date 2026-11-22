@@ -44,7 +44,7 @@ public partial class WorkspaceItemViewModel : ObservableObject
 
     public bool IsRvmProtected { get; }
 
-    public bool CanConfigureRvm => IsCustom && IsRvmProtected;
+    public bool CanConfigureRvm => IsCustom;
 
     public string Key => DefinitionId ?? $"cwd:{Cwd}";
 

@@ -5,6 +5,31 @@ public sealed record RvmWorkspaceSession(ulong SessionId, string WorkspaceRoot, 
 // 全局 ACL 授权在执行前同步给引擎；路径与 capability SID 必须成对出现。
 public sealed record RvmToolAuthorization(string Path, string Name, string CapabilitySid);
 
+public enum RvmChangeKind
+{
+    Unspecified = 0,
+    Added = 1,
+    Modified = 2,
+    Deleted = 3,
+}
+
+public sealed record RvmFileChange(
+    string Path,
+    RvmChangeKind Kind,
+    ulong BeforeBytes,
+    ulong AfterBytes);
+
+public sealed record RvmSyncConflict(string Path, string Reason);
+
+public sealed record RvmWorkspaceDiff(
+    IReadOnlyList<RvmFileChange> Changes,
+    IReadOnlyList<RvmSyncConflict> Conflicts,
+    bool Truncated);
+
+public sealed record RvmWorkspaceApplyResult(
+    IReadOnlyList<RvmFileChange> Applied,
+    IReadOnlyList<RvmSyncConflict> Conflicts);
+
 // RvmEngine.exe 的宿主进程与命名管道客户端；所有数据来自引擎真实响应，失败只报错不伪造
 public interface IRvmEngineService : IDisposable
 {
@@ -30,7 +55,23 @@ public interface IRvmEngineService : IDisposable
         string storageKey,
         RvmSettings? settings = null,
         IReadOnlyList<RvmToolAuthorization>? toolAccess = null,
+        bool networkEnabled = false,
+        IReadOnlyList<string>? devices = null,
         CancellationToken cancellationToken = default);
     Task CloseSessionAsync(ulong sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>读取会话盘相对基线的变更与宿主冲突；失败返回 null 并写入 Status。</summary>
+    Task<RvmWorkspaceDiff?> DiffWorkspaceAsync(ulong sessionId, CancellationToken cancellationToken = default);
+
+    /// <summary>把会话盘变更同步回宿主工作区；冲突项跳过并在结果中报告。</summary>
+    Task<RvmWorkspaceApplyResult?> SyncWorkspaceAsync(
+        ulong sessionId,
+        bool all,
+        IReadOnlyList<string>? paths = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>丢弃会话盘变更，按宿主工作区恢复；失败返回 null。</summary>
+    Task<bool?> RollbackWorkspaceAsync(ulong sessionId, CancellationToken cancellationToken = default);
+
     Task ShutdownAsync();
 }

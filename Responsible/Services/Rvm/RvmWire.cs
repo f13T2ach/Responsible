@@ -65,7 +65,7 @@ internal sealed class RvmProtoReader
             var tag = ReadVarint(payload, ref offset);
             var field = (int)(tag >> 3);
             var wire = (int)(tag & 7);
-            if (field <= 0) throw new RvmProtocolException("字段号非法");
+            if (field <= 0) throw new RvmProtocolException("Invalid field number.");
             switch (wire)
             {
                 case 0:
@@ -82,7 +82,7 @@ internal sealed class RvmProtoReader
                 {
                     var length = ReadVarint(payload, ref offset);
                     if (length > int.MaxValue || offset + (int)length > payload.Length)
-                        throw new RvmProtocolException("字段长度越界");
+                        throw new RvmProtocolException("Field length is out of range.");
                     reader.Add(field, new Field(wire, offset, (int)length, 0));
                     offset += (int)length;
                     break;
@@ -92,9 +92,9 @@ internal sealed class RvmProtoReader
                     offset += 4;
                     break;
                 default:
-                    throw new RvmProtocolException($"不支持的 wire type {wire}");
+                    throw new RvmProtocolException($"Unsupported wire type {wire}.");
             }
-            if (offset > payload.Length) throw new RvmProtocolException("消息被截断");
+            if (offset > payload.Length) throw new RvmProtocolException("Message is truncated.");
         }
         return reader;
     }
@@ -127,16 +127,26 @@ internal sealed class RvmProtoReader
         return Parse(_payload[value.Value.Offset..(value.Value.Offset + value.Value.Length)]);
     }
 
+    public IEnumerable<RvmProtoReader> Messages(int field)
+    {
+        if (!_fields.TryGetValue(field, out var list)) yield break;
+        foreach (var value in list)
+        {
+            if (value.Wire != 2) continue;
+            yield return Parse(_payload[value.Offset..(value.Offset + value.Length)]);
+        }
+    }
+
     private static ulong ReadVarint(byte[] source, ref int offset)
     {
         ulong result = 0;
         for (var shift = 0; shift < 64; shift += 7)
         {
-            if (offset >= source.Length) throw new RvmProtocolException("varint 不完整");
+            if (offset >= source.Length) throw new RvmProtocolException("Incomplete varint.");
             var current = source[offset++];
             result |= (ulong)(current & 0x7F) << shift;
             if ((current & 0x80) == 0) return result;
         }
-        throw new RvmProtocolException("varint 过长");
+        throw new RvmProtocolException("Varint is too long.");
     }
 }

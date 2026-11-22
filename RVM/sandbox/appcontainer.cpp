@@ -187,7 +187,125 @@ void JoinCaptureThread(std::thread& thread) {
   thread.join();
 }
 
+HANDLE OpenDeviceForSecurity(const std::wstring& device_path) {
+  // WRITE_DAC is required to add or remove the sandbox ACE. Device opens often
+  // reject sharing, so retry without share modes before reporting failure.
+  const DWORD rights = READ_CONTROL | WRITE_DAC;
+  HANDLE handle = CreateFileW(device_path.c_str(), rights, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    handle = CreateFileW(device_path.c_str(), rights, 0, nullptr, OPEN_EXISTING,
+                         FILE_ATTRIBUTE_NORMAL, nullptr);
+  }
+  return handle;
+}
+
+bool DeviceAclAllows(PSID psid, PACL acl) {
+  if (acl == nullptr) return false;
+  constexpr ACCESS_MASK kNeeded = GENERIC_READ | GENERIC_WRITE;
+  for (WORD index = 0; index < acl->AceCount; ++index) {
+    LPVOID raw = nullptr;
+    if (!GetAce(acl, index, &raw) || raw == nullptr) continue;
+    const auto* header = static_cast<const ACE_HEADER*>(raw);
+    if (header->AceType != ACCESS_ALLOWED_ACE_TYPE) continue;
+    const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(raw);
+    if (!EqualSid(reinterpret_cast<PSID>(const_cast<DWORD*>(&ace->SidStart)), psid)) continue;
+    if ((ace->Mask & kNeeded) == kNeeded) return true;
+  }
+  return false;
+}
+
+core::Status ModifyDeviceAcl(const std::wstring& sid, const std::wstring& device_path,
+                             ACCESS_MODE mode) {
+  PSID psid = nullptr;
+  if (!ConvertStringSidToSidW(sid.c_str(), &psid)) {
+    return core::Status::Failure(core::Error(core::ErrorCode::kInvalidArgument,
+                                             "AppContainer SID is not valid", false,
+                                             LastErrorDetail(GetLastError())));
+  }
+
+  const DWORD wanted = READ_CONTROL | WRITE_DAC;
+  HANDLE device = OpenDeviceForSecurity(device_path);
+  if (device == INVALID_HANDLE_VALUE) {
+    const DWORD error = GetLastError();
+    LocalFree(psid);
+    return core::Status::Failure(core::Error(
+        core::ErrorCode::kPolicyDenied,
+        mode == GRANT_ACCESS ? "cannot open the device to grant sandbox access"
+                             : "cannot open the device to revoke sandbox access",
+        false, LastErrorDetail(error)));
+  }
+
+  PACL old_acl = nullptr;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  DWORD status = GetSecurityInfo(device, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                 nullptr, &old_acl, nullptr, &descriptor);
+  if (status == ERROR_SUCCESS && mode == GRANT_ACCESS && DeviceAclAllows(psid, old_acl)) {
+    if (descriptor != nullptr) LocalFree(descriptor);
+    CloseHandle(device);
+    LocalFree(psid);
+    return core::Status::Ok();
+  }
+
+  EXPLICIT_ACCESSW entry{};
+  entry.grfAccessPermissions = GENERIC_READ | GENERIC_WRITE;
+  entry.grfAccessMode = mode;
+  entry.grfInheritance = NO_INHERITANCE;
+  entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+  entry.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+  entry.Trustee.ptstrName = static_cast<LPWSTR>(psid);
+
+  PACL new_acl = nullptr;
+  if (status == ERROR_SUCCESS) {
+    status = SetEntriesInAclW(1, &entry, old_acl, &new_acl);
+  }
+  if (status == ERROR_SUCCESS) {
+    status = SetSecurityInfo(device, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr,
+                             new_acl, nullptr);
+  }
+  if (new_acl != nullptr) LocalFree(new_acl);
+  if (descriptor != nullptr) LocalFree(descriptor);
+  CloseHandle(device);
+  LocalFree(psid);
+
+  if (status != ERROR_SUCCESS) {
+    return core::Status::Failure(core::Error(
+        core::ErrorCode::kPolicyDenied,
+        mode == GRANT_ACCESS ? "failed to grant sandbox access to the device"
+                             : "failed to revoke sandbox access to the device",
+        false, LastErrorDetail(status) + " rights=" + std::to_string(wanted)));
+  }
+  return core::Status::Ok();
+}
+
 }  // namespace
+
+bool DeviceAllowsAccess(const std::wstring& sid, const std::wstring& device_path) {
+  PSID psid = nullptr;
+  if (!ConvertStringSidToSidW(sid.c_str(), &psid)) return false;
+  HANDLE device = OpenDeviceForSecurity(device_path);
+  if (device == INVALID_HANDLE_VALUE) {
+    LocalFree(psid);
+    return false;
+  }
+  PACL acl = nullptr;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  const DWORD status = GetSecurityInfo(device, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                       nullptr, &acl, nullptr, &descriptor);
+  const bool allowed = status == ERROR_SUCCESS && DeviceAclAllows(psid, acl);
+  if (descriptor != nullptr) LocalFree(descriptor);
+  CloseHandle(device);
+  LocalFree(psid);
+  return allowed;
+}
+
+core::Status GrantDeviceAccess(const std::wstring& sid, const std::wstring& device_path) {
+  return ModifyDeviceAcl(sid, device_path, GRANT_ACCESS);
+}
+
+core::Status RevokeDeviceAccess(const std::wstring& sid, const std::wstring& device_path) {
+  return ModifyDeviceAcl(sid, device_path, REVOKE_ACCESS);
+}
 
 core::Result<AppContainerProfile> CreateProfile(std::wstring_view name) {
   if (!IsValidProfileName(name)) {
@@ -410,12 +528,11 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
   }
 
   if (!appcontainer) {
-    // AppContainer cannot open WinFsp volumes (winfsp/winfsp#705), so mounted
-    // workspaces run under a restricted token. Access must satisfy both the
-    // normal token check and a restricting check that only accepts
-    // BUILTIN\Users (OS binaries) or the session SID granted on the
-    // workspace/temp/tools. The host user profile grants neither to the
-    // restriction, so it stays unreadable.
+    // Privilege-stripped restricted token inside the job object. The DACL
+    // check only accepts BUILTIN\Users (OS binaries) or the session SID
+    // granted on the workspace/temp/tools, so the host profile stays
+    // unreadable. Console images cannot start this way on Windows build
+    // 26300 (every launch exits 0xC0000022), so only diagnostics use it.
     HANDLE self = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY,
                           &self)) {
@@ -598,6 +715,7 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
   }
 
   ResumeThread(handles.thread);
+  if (options.on_started) options.on_started(GetProcessId(handles.process));
 
   CaptureState capture;
   capture.options = &options;
@@ -653,6 +771,7 @@ core::Result<ProcessResult> RunProcess(const ProcessOptions& options) {
   result.error = std::move(capture.error);
   result.output_truncated = capture.output_truncated;
   result.error_truncated = capture.error_truncated;
+  if (options.on_finished) options.on_finished();
   return core::Ok(std::move(result));
 }
 

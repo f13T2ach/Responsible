@@ -50,13 +50,13 @@ public sealed class WinFspService : IWinFspService
         var trimmed = (value ?? string.Empty).Trim().TrimEnd(':').ToUpperInvariant();
         if (trimmed.Length != 1 || trimmed[0] < 'A' || trimmed[0] > 'Z')
         {
-            error = "盘符必须是 A–Z 中的单个字母。";
+            error = "The drive letter must be a single letter from A to Z.";
             return false;
         }
 
         if (trimmed[0] == ReservedDrive)
         {
-            error = $"{trimmed}: 是系统盘，不能用于 WinFsp 虚拟盘。";
+            error = $"{trimmed}: is the system drive and cannot be used for the WinFsp virtual drive.";
             return false;
         }
 
@@ -81,7 +81,7 @@ public sealed class WinFspService : IWinFspService
     public async Task<WinFspInstallResult> InstallAsync()
     {
         if (!File.Exists(InstallerPath))
-            return new WinFspInstallResult(false, -1, $"未找到随应用分发的 WinFsp 安装包：{InstallerPath}");
+            return new WinFspInstallResult(false, -1, $"The WinFsp installer shipped with the app was not found: {InstallerPath}");
 
         var start = new ProcessStartInfo("msiexec.exe")
         {
@@ -97,21 +97,21 @@ public sealed class WinFspService : IWinFspService
         {
             using var process = Process.Start(start);
             if (process is null)
-                return new WinFspInstallResult(false, -1, "无法启动 WinFsp 安装程序。");
+                return new WinFspInstallResult(false, -1, "Unable to start the WinFsp installer.");
 
             await process.WaitForExitAsync();
             return process.ExitCode == 0
                 ? new WinFspInstallResult(true, 0, string.Empty)
                 : new WinFspInstallResult(false, process.ExitCode,
-                    $"WinFsp 安装程序退出码 {process.ExitCode}，安装未完成。");
+                    $"The WinFsp installer exited with code {process.ExitCode}; installation did not complete.");
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            return new WinFspInstallResult(false, -1, "安装已取消：需要管理员权限才能安装 WinFsp。");
+            return new WinFspInstallResult(false, -1, "Installation canceled: administrator rights are required to install WinFsp.");
         }
         catch (Exception ex) when (ex is Win32Exception or IOException or InvalidOperationException)
         {
-            return new WinFspInstallResult(false, -1, $"WinFsp 安装失败：{ex.Message}");
+            return new WinFspInstallResult(false, -1, $"WinFsp installation failed: {ex.Message}");
         }
     }
 

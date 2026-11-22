@@ -22,8 +22,8 @@
                        Style="{StaticResource MoeWorkspaceActionButtonStyle}"
                        Icon="{ui:SymbolIcon Symbol=Dismiss24, FontSize=14}"
                        Command="{Binding CancelCommand}"
-                       ToolTip="关闭" />
-            <TextBlock Text="新建工作区"
+                       ToolTip="{DynamicResource L.Common.Close}" />
+            <TextBlock Text="{DynamicResource L.Workspace.New}"
                        FontSize="17"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center"
@@ -32,14 +32,14 @@
 
         <ScrollViewer Grid.Row="1" MaxHeight="470" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="4,0,8,0">
-                <TextBlock Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,6" Text="文件所在位置" />
+                <TextBlock Style="{StaticResource FieldLabelStyle}" Margin="0,12,0,6" Text="{DynamicResource L.Workspace.Location}" />
                 <ComboBox Width="340"
                           HorizontalAlignment="Left"
                           FontSize="13"
                           ItemsSource="{Binding LocationOptions}"
                           SelectedItem="{Binding SelectedLocation}" />
 
-                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="源文件夹" />
+                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Workspace.SourceFolders}" />
                 <Grid Height="96"
                       Margin="0,0,0,4"
                       AllowDrop="True"
@@ -53,7 +53,7 @@
                         <ui:SymbolIcon Symbol="FolderAdd24"
                                        FontSize="18"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                        <TextBlock Text="点击添加可读写文件夹"
+                        <TextBlock Text="{DynamicResource L.Workspace.AddFolderHint}"
                                    Margin="8,0,0,0"
                                    FontSize="13"
                                    VerticalAlignment="Center"
@@ -67,7 +67,7 @@
                                AllowDrop="True"
                                Click="OnBrowseFolders"
                                Cursor="Hand"
-                               ToolTip="选择文件夹，也可以直接把文件夹拖到这里" />
+                               ToolTip="{DynamicResource L.Workspace.PickFolder}" />
                 </Grid>
 
                 <ItemsControl ItemsSource="{Binding Folders}" Margin="0,0,0,4">
@@ -86,7 +86,7 @@
                                                Margin="6,0,0,0"
                                                Command="{Binding DataContext.RemoveFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                CommandParameter="{Binding}"
-                                               ToolTip="移除文件夹" />
+                                               ToolTip="{DynamicResource L.Workspace.RemoveFolder}" />
                                     <ui:SymbolIcon DockPanel.Dock="Left"
                                                    Symbol="Folder24"
                                                    FontSize="15"
@@ -109,9 +109,9 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="工作区名称" />
+                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="{DynamicResource L.Workspace.Name}" />
                 <controls:PlaceholderTextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
-                                             Placeholder="输入名称…" />
+                                             Placeholder="{DynamicResource L.Workspace.NamePlaceholder}" />
                 <TextBlock Style="{StaticResource FieldWarningStyle}"
                            Text="{Binding ErrorText}"
                            Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}" />
@@ -120,7 +120,7 @@
                           IsChecked="{Binding RvmProtection}"
                           VerticalContentAlignment="Top">
                     <StackPanel Margin="6,0,0,0">
-                        <TextBlock Text="RVM 隔离保护"
+                        <TextBlock Text="{DynamicResource L.Workspace.RvmProtection}"
                                    FontSize="13"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -128,9 +128,63 @@
                                    FontSize="11.5"
                                    TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                   Text="命令在独立沙箱会话中执行，工作区经专属盘符挂载，临时文件写入工作区专属 Temp。未勾选时使用 DSH 自带沙箱。" />
+                                   Text="{DynamicResource L.Workspace.RvmDescription}" />
                     </StackPanel>
                 </CheckBox>
+
+                <Border Margin="0,10,0,0"
+                        Padding="12,10"
+                        CornerRadius="6"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        Visibility="{Binding RvmProtection, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ui:SymbolIcon Grid.Column="0"
+                                           Symbol="Folder24"
+                                           FontSize="16"
+                                           Margin="0,1,8,0"
+                                           VerticalAlignment="Top"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{DynamicResource L.Workspace.GitSnapshot}"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                <TextBlock Margin="0,2,0,0"
+                                           FontSize="11.5"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           Text="{Binding GitIndexStatus}" />
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,8,0,0"
+                                    Visibility="{Binding IsGitIndexNeeded, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ui:Button Content="{DynamicResource L.Workspace.FullIndex}"
+                                       Appearance="Primary"
+                                       FontSize="12"
+                                       Padding="12,5"
+                                       ToolTip="{DynamicResource L.Workspace.FullIndexTip}"
+                                       Command="{Binding InitializeFullGitIndexCommand}"
+                                       IsEnabled="{Binding IsGitIndexIdle}" />
+                            <ui:Button Content="{DynamicResource L.Workspace.NormalIndex}"
+                                       Appearance="Secondary"
+                                       FontSize="12"
+                                       Padding="12,5"
+                                       Margin="8,0,0,0"
+                                       ToolTip="{DynamicResource L.Workspace.NormalIndexTip}"
+                                       Command="{Binding InitializeGitIndexCommand}"
+                                       IsEnabled="{Binding IsGitIndexIdle}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
 
                 <Expander Margin="0,10,0,0"
                           Padding="10,4"
@@ -142,7 +196,7 @@
                                            FontSize="15"
                                            Margin="0,0,8,0"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                            <TextBlock Text="RVM 设置 · 环境变量与工具"
+                            <TextBlock Text="{DynamicResource L.Workspace.RvmSettings}"
                                        FontSize="12.5"
                                        VerticalAlignment="Center"
                                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -169,15 +223,15 @@
                             <TextBlock FontSize="12.5"
                                        TextWrapping="Wrap"
                                        Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                       Text="AI 受到隔离，可能无法使用你安装在本机的工具，确定不额外提供吗？" />
+                                       Text="{DynamicResource L.Workspace.IsolatedWarning}" />
                         </DockPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                            <ui:Button Content="返回设置"
+                            <ui:Button Content="{DynamicResource L.Workspace.BackToSettings}"
                                        Appearance="Secondary"
                                        FontSize="12"
                                        Padding="12,5"
                                        Command="{Binding DismissRvmWarningCommand}" />
-                            <ui:Button Content="仍然创建"
+                            <ui:Button Content="{DynamicResource L.Workspace.CreateAnyway}"
                                        Appearance="Primary"
                                        FontSize="12"
                                        Padding="12,5"
@@ -193,12 +247,12 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,16,0,0">
-            <ui:Button Content="取消"
+            <ui:Button Content="{DynamicResource L.Common.Cancel}"
                        Appearance="Secondary"
                        FontSize="13"
                        Padding="20,8"
                        Command="{Binding CancelCommand}" />
-            <ui:Button Content="创建"
+            <ui:Button Content="{DynamicResource L.Workspace.Create}"
                        Style="{StaticResource ConfirmButtonStyle}"
                        FontSize="13"
                        Padding="20,8"

@@ -1,5 +1,6 @@
 import type { WireChanges, WireMessage, WirePart, WireTool, WireUsage } from "./bridge";
 import { renderMarkdown, type CodeBlock } from "./markdown";
+import { getLocale, t } from "./i18n";
 import { TurnRail, type TurnSource } from "./turn-rail";
 
 export const icons = {
@@ -45,16 +46,18 @@ export const icons = {
     '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5L14.5 14h-13z"/><path d="M8 6.5v3.2"/><path d="M8 11.6h.01"/></svg>',
 };
 
-const toolLabels: Record<string, string> = {
-  bash: "运行命令",
-  read: "读取",
-  search: "搜索",
-  write: "写入",
-  edit: "编辑",
-  code: "代码",
-  mcp: "MCP",
-  tools: "工具调用",
+const toolLabelKeys: Record<string, string> = {
+  bash: "tool.bash",
+  read: "tool.read",
+  search: "tool.search",
+  write: "tool.write",
+  edit: "tool.edit",
+  code: "tool.code",
+  mcp: "tool.mcp",
+  tools: "tool.tools",
 };
+
+const toolLabel = (variant: string): string => t(toolLabelKeys[variant] ?? "tool.tools");
 
 const toolIcons: Record<string, string> = {
   bash: icons.terminal,
@@ -67,11 +70,10 @@ const toolIcons: Record<string, string> = {
   tools: icons.wrench,
 };
 
-const toolStatus: Record<string, string> = {
-  running: "运行中",
-  error: "失败",
-  stopped: "已停止",
-  ok: "",
+const toolStatusKeys: Record<string, string> = {
+  running: "tool.running",
+  error: "tool.error",
+  stopped: "tool.stopped",
 };
 
 const mcpDisplayName = (name: string): string =>
@@ -86,7 +88,7 @@ const prettyInput = (raw: string): string => {
 };
 
 const timeText = (ts: number): string =>
-  new Date(ts).toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" });
+  new Date(ts).toLocaleTimeString(getLocale(), { hour12: false, hour: "2-digit", minute: "2-digit" });
 
 const scaled = (value: number): string =>
   value >= 100 ? String(Math.round(value)) : String(Math.round(value * 10) / 10);
@@ -135,6 +137,7 @@ export class HistoryView {
   private readonly turns: TurnState[] = [];
   private readonly rail: TurnRail;
   private readonly changeNodes: HTMLElement[] = [];
+  private readonly changeList: WireChanges[] = [];
   private readonly partStart = new Map<string, number>();
   private readonly thinkOpen = new Map<string, boolean>();
   private readonly favCache = new Map<string, string | null>();
@@ -154,7 +157,7 @@ export class HistoryView {
     this.jump = document.createElement("button");
     this.jump.className = "jump-bottom";
     this.jump.type = "button";
-    this.jump.innerHTML = `${icons.down}<span>回到底部</span>`;
+    this.jump.innerHTML = `${icons.down}<span>${t("backBottom")}</span>`;
     // jump 必须留在滚动容器外：abspos 子元素会随内容一起滚走
     this.root = document.createElement("div");
     this.root.className = "scroll-wrap";
@@ -234,7 +237,7 @@ export class HistoryView {
     if (btn.classList.contains("copied")) return;
     const original = btn.innerHTML;
     btn.classList.add("copied");
-    btn.innerHTML = `${icons.check}<span>已复制</span>`;
+    btn.innerHTML = `${icons.check}<span>${t("copied")}</span>`;
     window.setTimeout(() => {
       btn.classList.remove("copied");
       btn.innerHTML = original;
@@ -271,6 +274,7 @@ export class HistoryView {
     this.turns.length = 0;
     this.nodes.clear();
     this.changeNodes.length = 0;
+    this.changeList.length = 0;
     this.partStart.clear();
     this.thinkOpen.clear();
     this.thread.innerHTML = "";
@@ -574,14 +578,14 @@ export class HistoryView {
     element.classList.toggle("open", running || (this.thinkOpen.get(key) ?? false));
     const seconds = part.ms !== undefined ? Math.max(1, Math.round(part.ms / 1000)) : null;
     element.querySelector(".think-label")!.textContent =
-      running ? "思考中" : seconds !== null ? `已思考 · ${seconds}s` : "已思考";
+      running ? t("thinking") : seconds !== null ? t("thoughtSeconds", seconds) : t("thought");
     element.querySelector(".think-text")!.textContent = part.text;
   }
 
   private errorPart(msg: WireMessage): HTMLElement {
     const error = document.createElement("div");
     error.className = "msg-error";
-    error.textContent = msg.text || "生成中断";
+    error.textContent = msg.text || t("interrupted");
     return error;
   }
 
@@ -607,7 +611,7 @@ export class HistoryView {
 
     const title = document.createElement("span");
     title.className = "tool-title";
-    title.textContent = toolLabels[tool.variant] ?? "工具调用";
+    title.textContent = toolLabel(tool.variant);
 
     const summary = document.createElement("span");
     summary.className = "tool-summary";
@@ -618,7 +622,8 @@ export class HistoryView {
 
     const state = document.createElement("span");
     state.className = "tool-state";
-    state.textContent = toolStatus[tool.state] ?? "";
+    const statusKey = toolStatusKeys[tool.state];
+    state.textContent = statusKey ? t(statusKey) : "";
 
     head.append(status, icon, title, summary, state);
 
@@ -636,8 +641,8 @@ export class HistoryView {
     if (hasDetail) {
       const detail = document.createElement("div");
       detail.className = "tool-detail";
-      if ((tool.input ?? "") !== "") detail.append(this.toolBlock("输入", prettyInput(tool.input!)));
-      if ((tool.output ?? "") !== "") detail.append(this.toolBlock("输出", tool.output!));
+      if ((tool.input ?? "") !== "") detail.append(this.toolBlock(t("print.input"), prettyInput(tool.input!)));
+      if ((tool.output ?? "") !== "") detail.append(this.toolBlock(t("print.output"), tool.output!));
       row.append(detail);
     }
     return row;
@@ -661,7 +666,7 @@ export class HistoryView {
     head.innerHTML =
       `${icons.sparkle}<span class="model"></span><time>${timeText(msg.ts)}</time>` +
       (msg.state === "streaming"
-        ? `<span class="streaming"><span class="live-dot on"></span>生成中<span class="elapsed"></span></span>`
+        ? `<span class="streaming"><span class="live-dot on"></span>${t("generating")}<span class="elapsed"></span></span>`
         : "");
     head.querySelector(".model")!.textContent = msg.model ?? "Test";
   }
@@ -725,14 +730,14 @@ export class HistoryView {
     actions.replaceChildren();
 
     if (msg.state === "streaming") {
-      actions.append(this.actionButton(msg, "stop", icons.stop, "停止", true));
+      actions.append(this.actionButton(msg, "stop", icons.stop, t("stop"), true));
       return;
     }
 
-    actions.append(this.actionButton(msg, "copy", icons.copy, "复制"));
+    actions.append(this.actionButton(msg, "copy", icons.copy, t("copy")));
     if (msg.branchSeq !== undefined) {
-      const branch = this.actionButton(msg, "branch", icons.branch, "分支");
-      branch.title = msg.branchUnavailable ? "仅可从已完成轮次的最后一条消息分支" : "在新对话中分支";
+      const branch = this.actionButton(msg, "branch", icons.branch, t("branch"));
+      branch.title = msg.branchUnavailable ? t("branchUnavailable") : t("branchNew");
       if (msg.branchUnavailable) {
         branch.disabled = true;
         branch.classList.add("unavailable");
@@ -768,23 +773,23 @@ export class HistoryView {
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.className = "usage-trigger";
-    trigger.setAttribute("aria-label", "本轮用量");
+    trigger.setAttribute("aria-label", t("usage.title"));
     trigger.innerHTML = icons.database;
     const label = document.createElement("span");
     label.className = "usage-label";
-    label.textContent = `用量 ${compactTokens(usage.totalTokens)}`;
+    label.textContent = t("usage.label", compactTokens(usage.totalTokens));
     trigger.append(label);
 
     const panel = document.createElement("div");
     panel.className = "usage-panel";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "本轮用量");
+    panel.setAttribute("aria-label", t("usage.title"));
 
     const head = document.createElement("div");
     head.className = "usage-head";
     const title = document.createElement("span");
     title.className = "usage-title";
-    title.innerHTML = `${icons.database}<span>本轮用量</span>`;
+    title.innerHTML = `${icons.database}<span>${t("usage.title")}</span>`;
     const total = document.createElement("span");
     total.className = "usage-total";
     total.textContent = `${exactTokens(usage.totalTokens)} tok`;
@@ -804,24 +809,24 @@ export class HistoryView {
     };
 
     const routes = usage.routes?.map((route) => `${route.provider}/${route.model}`).join(", ") ?? "";
-    if (routes !== "") row("提供方 / 模型", routes);
+    if (routes !== "") row(t("usage.providerModel"), routes);
 
     const prompt = usage.totalTokens - usage.outputTokens;
     const cacheHit = usage.cacheReadTokens === undefined ? null : cacheHitPercent(usage.cacheReadTokens, prompt);
-    if (cacheHit !== null) row("缓存命中", `${cacheHit}%`);
+    if (cacheHit !== null) row(t("usage.cacheHit"), `${cacheHit}%`);
 
-    row("未缓存输入", `${exactTokens(usage.uncachedInputTokens)} tok`);
-    if (usage.cacheReadTokens !== undefined) row("缓存读取", `${exactTokens(usage.cacheReadTokens)} tok`);
-    if (usage.cacheWriteTokens !== undefined) row("缓存写入", `${exactTokens(usage.cacheWriteTokens)} tok`);
+    row(t("usage.uncachedInput"), `${exactTokens(usage.uncachedInputTokens)} tok`);
+    if (usage.cacheReadTokens !== undefined) row(t("usage.cacheRead"), `${exactTokens(usage.cacheReadTokens)} tok`);
+    if (usage.cacheWriteTokens !== undefined) row(t("usage.cacheWrite"), `${exactTokens(usage.cacheWriteTokens)} tok`);
 
     const dt = document.createElement("dt");
-    dt.textContent = "输出";
+    dt.textContent = t("usage.output");
     const dd = document.createElement("dd");
     dd.textContent = `${exactTokens(usage.outputTokens)} tok`;
     if (usage.reasoningTokens !== undefined) {
       const reasoning = document.createElement("span");
       reasoning.className = "usage-reasoning";
-      reasoning.textContent = `（其中推理 ${exactTokens(usage.reasoningTokens)} tok）`;
+      reasoning.textContent = t("usage.reasoning", exactTokens(usage.reasoningTokens));
       dd.append(reasoning);
     }
     rows.append(dt, dd);
@@ -833,6 +838,7 @@ export class HistoryView {
 
   appendChanges(changes: WireChanges): void {
     if (changes.total <= 0) return;
+    this.changeList.push(changes);
     const card = document.createElement("div");
     card.className = "msg-changes open";
     const head = document.createElement("button");
@@ -843,7 +849,7 @@ export class HistoryView {
       `<span class="changes-ico">${icons.file}</span>` +
       `<span class="changes-title"></span>` +
       `<span class="changes-stat"><span class="change-add"></span><span class="change-del"></span></span>`;
-    head.querySelector(".changes-title")!.textContent = `已编辑 ${changes.total} 个文件`;
+    head.querySelector(".changes-title")!.textContent = t("changes.edited", changes.total);
     head.querySelector(".change-add")!.textContent = `+${changes.added}`;
     head.querySelector(".change-del")!.textContent = `-${changes.deleted}`;
 
@@ -860,7 +866,7 @@ export class HistoryView {
       row.innerHTML =
         `${icons.file}<span class="change-name"></span>` +
         (f.binary || f.oversized
-          ? `<span class="change-size">${f.binary ? "二进制" : "过大"}</span>`
+          ? `<span class="change-size">${f.binary ? t("changes.binary") : t("changes.oversized")}</span>`
           : `<span class="change-add">+${f.added}</span><span class="change-del">-${f.deleted}</span>`);
       row.querySelector(".change-name")!.textContent = f.display;
       list.append(row);
@@ -868,7 +874,7 @@ export class HistoryView {
     if (changes.total > files.length) {
       const more = document.createElement("div");
       more.className = "changes-more";
-      more.textContent = `还有 ${changes.total - files.length} 个文件`;
+      more.textContent = t("changes.more", changes.total - files.length);
       list.append(more);
     }
     card.append(head, list);
@@ -879,6 +885,33 @@ export class HistoryView {
       { duration: 180, easing: "cubic-bezier(.2,.7,.3,1)" },
     );
     this.syncScroll();
+  }
+
+  // 语言切换后按新文案重放：消息、思考展开状态、文件改动与滚动位置都保留
+  relocalize(): void {
+    const messages = this.messages.slice();
+    const changes = this.changeList.slice();
+    const open = new Map(this.thinkOpen);
+    const stick = this.stick;
+    const top = this.scroll.scrollTop;
+    this.reset(messages);
+    this.thinkOpen.clear();
+    for (const [key, value] of open) this.thinkOpen.set(key, value);
+    for (const msg of this.messages) {
+      const node = this.nodes.get(msg.id);
+      if (!node) continue;
+      this.paintHead(msg, node);
+      this.paintProcess(msg, node, true);
+      this.paintActions(msg, node);
+    }
+    this.jump.innerHTML = `${icons.down}<span>${t("backBottom")}</span>`;
+    this.rail.sync(this.turns);
+    for (const change of changes) this.appendChanges(change);
+    if (!stick) {
+      this.stick = false;
+      this.scroll.scrollTop = top;
+      this.jump.classList.toggle("show", this.messages.length > 0);
+    }
   }
 
   snapBottom(): void {

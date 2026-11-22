@@ -12,6 +12,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <ui:ThemesDictionary Theme="Dark" />
                 <ui:ControlsDictionary />
+                <ResourceDictionary Source="Localization/Strings.zh-CN.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
@@ -362,8 +363,8 @@
                                 <Border x:Name="Card"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
-                                        Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType={x:Type controls:ExViewHost}}, Converter={StaticResource FractionConverter}, ConverterParameter=0.5}"
-                                        Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type controls:ExViewHost}}, Converter={StaticResource FractionConverter}, ConverterParameter=0.5}"
+                                        Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType={x:Type controls:ExViewHost}}, Converter={StaticResource FractionConverter}, ConverterParameter=0.6667}"
+                                        Height="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type controls:ExViewHost}}, Converter={StaticResource FractionConverter}, ConverterParameter=0.6667}"
                                         CornerRadius="12"
                                         Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
                                         BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"

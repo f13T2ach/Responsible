@@ -1,5 +1,7 @@
 #include "server/shell_runner.h"
 
+#include <filesystem>
+
 #include <windows.h>
 
 #include <algorithm>
@@ -10,6 +12,7 @@
 
 #include "channel/convert.h"
 #include "core/error.h"
+#include "server/network_audit.h"
 
 namespace rvm::server {
 namespace {
@@ -304,6 +307,9 @@ core::Result<ShellOutcome> RunShell(const ShellContext& context,
   for (const runtime::ToolAccess& tool : context.tools) {
     if (!tool.capability_sid.empty()) options.capabilities.push_back(tool.capability_sid);
   }
+  if (context.network_enabled && !context.network_capability_sid.empty()) {
+    options.capabilities.push_back(context.network_capability_sid);
+  }
   if (!request.stdin_data().empty()) {
     options.stdin_data.assign(request.stdin_data().begin(), request.stdin_data().end());
   }
@@ -311,6 +317,17 @@ core::Result<ShellOutcome> RunShell(const ShellContext& context,
   options.containment = context.restricted_token ? sandbox::Containment::kRestrictedToken
                                                  : sandbox::Containment::kAppContainer;
   options.appcontainer_sid = context.appcontainer_sid;
+
+  // Network audit is real table sampling scoped to this command's process tree.
+  // It only runs when the session actually has outbound capability; a disabled
+  // session leaves no listener or connection to observe.
+  NetworkAudit audit(context.network_enabled && !context.archive_root.empty()
+                         ? (std::filesystem::path(context.archive_root) / L"network.log").wstring()
+                         : std::wstring());
+  options.on_started = [&audit, &context](std::uint32_t pid) {
+    audit.Start(context.session_id, pid);
+  };
+  options.on_finished = [&audit] { audit.Stop(); };
 
   const auto started = std::chrono::steady_clock::now();
   auto result = sandbox::RunProcess(options);

@@ -35,6 +35,15 @@ core::Status RevokeDirectory(const std::wstring& sid, const std::wstring& path, 
 core::Status GrantTraverseAncestors(const std::wstring& sid, const std::wstring& path,
                                     std::vector<std::wstring>* granted);
 
+// Device objects (for example \\.\COM3) are not files under a directory, so
+// the directory traversal grant cannot reach them. These helpers add/remove a
+// single ACE on the device security descriptor and fail loudly when the engine
+// cannot open the device for WRITE_DAC: a requested device must never appear
+// usable when it is not.
+bool DeviceAllowsAccess(const std::wstring& sid, const std::wstring& device_path);
+core::Status GrantDeviceAccess(const std::wstring& sid, const std::wstring& device_path);
+core::Status RevokeDeviceAccess(const std::wstring& sid, const std::wstring& device_path);
+
 enum class Containment {
   // Full AppContainer token: DACL isolation, no host profile or host temp
   // access unless an explicit grant exists.
@@ -67,6 +76,10 @@ struct ProcessOptions {
   std::function<void(bool stderr_stream, const std::uint8_t* data, std::size_t size)> sink;
   // Polled while the child runs; returning true terminates the job early.
   std::function<bool()> should_cancel;
+  // Called after the child is resumed and once it has exited. The network
+  // audit sampler uses these to watch only this command's process tree.
+  std::function<void(std::uint32_t)> on_started;
+  std::function<void()> on_finished;
 };
 
 struct ProcessResult {

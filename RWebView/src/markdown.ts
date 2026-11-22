@@ -1,4 +1,5 @@
 import { renderTex } from "./tex";
+import { t } from "./i18n";
 
 // 极简 markdown：先整体转义再做块级/行内变换，消息文本不可注入 HTML。
 const escapeHtml = (s: string): string =>
@@ -215,7 +216,7 @@ export function renderMarkdown(text: string, blocks: Map<string, CodeBlock>, opt
       blocks.set(id, { id, lang, code: body.join("\n") });
       out.push(
         `<div class="codeblock"><div class="codeblock-head"><span>${escapeHtml(lang)}</span>` +
-          `<button class="code-copy" data-code="${id}" type="button">复制</button></div>` +
+          `<button class="code-copy" data-code="${id}" type="button">${t("copy")}</button></div>` +
           `<pre><code>${escapeHtml(body.join("\n"))}</code></pre></div>`,
       );
       continue;

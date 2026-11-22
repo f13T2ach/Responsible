@@ -2,6 +2,7 @@
 import { applyPalette, defaultPalette, type Palette, type WireMessage, type WireStats } from "./bridge";
 import type { HistoryView } from "./history";
 import type { StatsView } from "./stats";
+import { onLocaleChange, t } from "./i18n";
 
 const lightPalette: Palette = {
   bg: "#f3f3f3",
@@ -148,13 +149,16 @@ export function installPreview(deps: Deps): (action: "stop", id: string) => void
   const themeBtn = document.createElement("button");
   themeBtn.className = "preview-theme";
   themeBtn.type = "button";
-  themeBtn.textContent = "浅色";
+  themeBtn.textContent = t("preview.light");
   themeBtn.addEventListener("click", () => {
     dark = !dark;
     applyPalette(dark ? "dark" : "light", dark ? defaultPalette : lightPalette);
-    themeBtn.textContent = dark ? "浅色" : "深色";
+    themeBtn.textContent = dark ? t("preview.light") : t("preview.dark");
   });
   stats.bar.querySelector(".stats-spacer")!.before(themeBtn);
+  onLocaleChange(() => {
+    themeBtn.textContent = dark ? t("preview.light") : t("preview.dark");
+  });
 
   const pushStats = (streaming: boolean): void => {
     deps.setStats(current);

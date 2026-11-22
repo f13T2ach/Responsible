@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using Responsible.ExView;
+using Responsible.Localization;
 using Responsible.Messages;
 using Responsible.MoeViews.Plugins;
 using Responsible.Services;
@@ -109,6 +110,7 @@ public partial class MoeViewModel : ObservableObject
         }));
         messenger.Register<ModelOptionsChangedMessage>(this, (_, _) => Ui(() =>
             SelectedModelOption = ModelOptions.FirstOrDefault(option => option.IsSelected) ?? ModelOptions.FirstOrDefault()));
+        messenger.Register<LanguageChangedMessage>(this, (_, _) => Ui(RefreshLanguage));
         // 列表与历史并行加载：历史先到时当前会话可能还未出现在侧栏，加载完成后再选一次
         session.Reloaded += OnSessionReloaded;
         session.PermissionsChanged += OnPermissionsChanged;
@@ -143,6 +145,20 @@ public partial class MoeViewModel : ObservableObject
 
     public int ContextUsagePercent => (int)Math.Round(Session.Stats.ContextPercent);
 
+    public string RoundsStepsText => Loc.F("L.Moe.RoundsSteps", Rounds, Steps);
+
+    public string TokenUsageWithCacheText => Loc.F("L.Moe.TokenUsage", TokenUsageText, CacheHitRateText);
+
+    public string ContextUsageText => Loc.F("L.Moe.ContextUsage", ContextUsagePercent);
+
+    private void RefreshLanguage()
+    {
+        RebuildWorkspaces(_lastRows);
+        RefreshPermissionUi();
+        RaiseStatsChanged();
+        OnWorkspaceBadgeChanged();
+    }
+
     private void RaiseStatsChanged()
     {
         OnPropertyChanged(nameof(Rounds));
@@ -151,6 +167,9 @@ public partial class MoeViewModel : ObservableObject
         OnPropertyChanged(nameof(TokenUsageText));
         OnPropertyChanged(nameof(CacheHitRateText));
         OnPropertyChanged(nameof(ContextUsagePercent));
+        OnPropertyChanged(nameof(RoundsStepsText));
+        OnPropertyChanged(nameof(TokenUsageWithCacheText));
+        OnPropertyChanged(nameof(ContextUsageText));
     }
 
     private void OnSessionReloaded() => Ui(SelectCurrentConversation);
@@ -272,7 +291,7 @@ public partial class MoeViewModel : ObservableObject
 
     private static ConversationItemViewModel ToConversation(DshSessionRow row) => new()
     {
-        Title = string.IsNullOrWhiteSpace(row.Title) ? "新对话" : row.Title,
+        Title = string.IsNullOrWhiteSpace(row.Title) ? Loc.T("L.Moe.NewConversationTitle") : row.Title,
         SessionId = row.SessionId,
         UpdatedAt = row.UpdatedAt,
     };
@@ -308,10 +327,10 @@ public partial class MoeViewModel : ObservableObject
 
     private static string WorkspaceName(string cwd)
     {
-        if (string.IsNullOrWhiteSpace(cwd)) return "未指定工作区";
+        if (string.IsNullOrWhiteSpace(cwd)) return Loc.T("L.Moe.UnnamedWorkspace");
         var trimmed = cwd.TrimEnd('\\', '/');
         var name = Path.GetFileName(trimmed);
-        if (name == "default-workspace") return "默认工作区";
+        if (name == "default-workspace") return Loc.T("L.Moe.DefaultWorkspace");
         return string.IsNullOrEmpty(name) ? cwd : name;
     }
 
@@ -389,9 +408,9 @@ public partial class MoeViewModel : ObservableObject
         PermissionOptions.Add(new PermissionOptionViewModel
         {
             Value = ChatSessionService.RvmPresetValue,
-            Label = "RVM 隔离保护",
-            Description = "命令在独立沙箱会话中执行，工作区经专属盘符挂载，临时文件写入工作区专属 Temp；选择下方其它等级会关闭保护并恢复 DSH 沙箱。",
-            Badge = "安全",
+            Label = Loc.T("L.Moe.Permission.RvmLabel"),
+            Description = Loc.T("L.Moe.Permission.RvmDescription"),
+            Badge = Loc.T("L.Moe.Permission.SafeBadge"),
             Icon = SymbolRegular.Shield24,
             HasIcon = true,
             IsRvmProtection = true,
@@ -406,7 +425,7 @@ public partial class MoeViewModel : ObservableObject
                 Value = option.Value,
                 Label = PermissionLabelOf(option.Value, option.Name),
                 Description = option.Value == "auto"
-                    ? AutoReviewDescription
+                    ? Loc.T("L.Moe.Permission.AutoDescription")
                     : option.Description ?? PresetDescriptionOf(option.Value),
                 Badge = option.Value == "auto" ? "EXP" : null,
                 IsDangerous = option.Value == "danger-full-access",
@@ -419,7 +438,7 @@ public partial class MoeViewModel : ObservableObject
         if (protectedByRvm)
         {
             IsPermissionAvailable = true;
-            PermissionLabel = "RVM 隔离保护";
+            PermissionLabel = Loc.T("L.Moe.Permission.RvmLabel");
             PermissionIcon = SymbolRegular.Shield24;
             PermissionHasIcon = true;
             PermissionDescription = PermissionOptions[0].Description;
@@ -451,7 +470,7 @@ public partial class MoeViewModel : ObservableObject
             // 此工作区从未配置过：开启保护时先让用户决定暴露哪些环境变量/工具
             if (current is null || !current.RvmConfigured)
             {
-                settings = await ShowRvmSettingsDialogAsync("开启 RVM 隔离保护", current);
+                settings = await ShowRvmSettingsDialogAsync(Loc.T("L.Moe.Permission.EnableRvmTitle"), current);
                 if (settings is null && !await ConfirmRvmSkipSettingsAsync()) return;
             }
 
@@ -461,7 +480,7 @@ public partial class MoeViewModel : ObservableObject
                 RebuildWorkspaces(_lastRows);
                 return;
             }
-            await ShowFailureAsync("开启 RVM 隔离保护失败", enabled.Message);
+            await ShowFailureAsync(Loc.T("L.Moe.Permission.EnableRvmFailed"), enabled.Message);
             return;
         }
 
@@ -472,7 +491,7 @@ public partial class MoeViewModel : ObservableObject
 
         var result = await Session.SelectPermissionAsync(option.Value);
         if (result.Ok) return;
-        await ShowFailureAsync("切换权限失败", result.Message);
+        await ShowFailureAsync(Loc.T("L.Moe.Permission.SwitchFailed"), result.Message);
     }
 
     private void EditWorkspaceRvmSettings(WorkspaceItemViewModel item) =>
@@ -484,11 +503,11 @@ public partial class MoeViewModel : ObservableObject
         var definition = _workspaceStore.All.FirstOrDefault(workspace => workspace.Id == id);
         if (definition is null) return;
 
-        var settings = await ShowRvmSettingsDialogAsync("RVM 设置", definition);
+        var settings = await ShowRvmSettingsDialogAsync(Loc.T("L.Moe.RvmSettings"), definition);
         if (settings is null) return;
         var result = await Session.UpdateRvmSettingsAsync(id, settings);
         if (result.Ok) return;
-        await ShowFailureAsync("保存 RVM 设置失败", result.Message);
+        await ShowFailureAsync(Loc.T("L.Moe.Permission.SaveRvmFailed"), result.Message);
     }
 
     private async Task<RvmSettings?> ShowRvmSettingsDialogAsync(string title, WorkspaceDefinition? definition)
@@ -500,8 +519,8 @@ public partial class MoeViewModel : ObservableObject
         {
             Title = title,
             Content = new RvmSettingsView { DataContext = viewModel },
-            PrimaryButtonText = "保存",
-            CloseButtonText = "取消",
+            PrimaryButtonText = Loc.T("L.Common.Save"),
+            CloseButtonText = Loc.T("L.Common.Cancel"),
             DialogWidth = 700,
             DialogHeight = 620,
         };
@@ -512,14 +531,14 @@ public partial class MoeViewModel : ObservableObject
     {
         var dialog = new ContentDialog
         {
-            Title = "AI 受到隔离",
+            Title = Loc.T("L.Moe.Permission.IsolatedTitle"),
             Content = new System.Windows.Controls.TextBlock
             {
-                Text = "AI 受到隔离，可能无法使用你安装在本机的工具，确定不额外提供吗？",
+                Text = Loc.T("L.Moe.Permission.IsolatedText"),
                 TextWrapping = System.Windows.TextWrapping.Wrap,
             },
-            PrimaryButtonText = "仍然开启",
-            CloseButtonText = "返回",
+            PrimaryButtonText = Loc.T("L.Moe.Permission.EnableAnyway"),
+            CloseButtonText = Loc.T("L.Common.Back"),
             DialogWidth = 480,
             DialogHeight = 280,
         };
@@ -535,7 +554,7 @@ public partial class MoeViewModel : ObservableObject
                 Text = message,
                 TextWrapping = System.Windows.TextWrapping.Wrap,
             },
-            CloseButtonText = "知道了",
+            CloseButtonText = Loc.T("L.Common.GotIt"),
             DialogWidth = 440,
             DialogHeight = 240,
         });
@@ -546,22 +565,24 @@ public partial class MoeViewModel : ObservableObject
         var isAuto = option.Value == "auto";
         var acknowledge = new System.Windows.Controls.CheckBox
         {
-            Content = isAuto ? "我已了解这些风险，并愿意继续" : "我已了解风险，并愿意继续",
+            Content = isAuto ? Loc.T("L.Moe.Permission.AcknowledgeAuto") : Loc.T("L.Moe.Permission.AcknowledgeFull"),
             Margin = new System.Windows.Thickness(0, 12, 0, 0),
         };
         var content = new System.Windows.Controls.StackPanel();
         content.Children.Add(new System.Windows.Controls.TextBlock
         {
-            Text = isAuto ? AutoReviewConfirmDescription : FullAccessConfirmDescription,
+            Text = isAuto
+                ? Loc.T("L.Moe.Permission.AutoConfirmDescription")
+                : Loc.T("L.Moe.Permission.FullAccessConfirmDescription"),
             TextWrapping = System.Windows.TextWrapping.Wrap,
         });
         content.Children.Add(acknowledge);
         var dialog = new ContentDialog
         {
-            Title = isAuto ? "确认启用自动审查（实验）？" : "确认启用完全权限？",
+            Title = isAuto ? Loc.T("L.Moe.Permission.ConfirmAutoTitle") : Loc.T("L.Moe.Permission.ConfirmFullTitle"),
             Content = content,
-            PrimaryButtonText = isAuto ? "启用自动审查" : "启用完全权限",
-            CloseButtonText = "取消",
+            PrimaryButtonText = isAuto ? Loc.T("L.Moe.Permission.EnableAuto") : Loc.T("L.Moe.Permission.EnableFull"),
+            CloseButtonText = Loc.T("L.Common.Cancel"),
             IsPrimaryButtonEnabled = false,
             DialogWidth = 480,
             DialogHeight = 340,
@@ -571,35 +592,19 @@ public partial class MoeViewModel : ObservableObject
         return await ShowDialogAsync(dialog) == ContentDialogResult.Primary;
     }
 
-    private const string FullAccessConfirmDescription =
-        "启用完全权限后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。";
-
-    private const string AutoReviewDescription =
-        "无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。";
-
-    private const string AutoReviewConfirmDescription =
-        "自动审查不使用沙箱。每次原生工具调用和 PTC 内层调用前，都会由与当前 agent 相同的模型进行审查；审查拒绝的调用由你批准或拒绝。此功能仍属实验性，可能误放行或误拒绝，并会消耗额外 token。";
-
-    // 内置预设的沙箱说明；宿主目录自带 description 时以宿主文案优先
-    private const string ReadOnlyDescription = "只能读取文件，写入与修改会被沙箱拒绝";
-
-    private const string WorkspaceWriteDescription = "可在当前工作区内读写文件，工作区外的修改会被拒绝";
-
-    private const string FullAccessDescription = "不再询问，可自由访问你的文件、终端和网络";
-
     // 与 DSH 客户端同一套内置标签映射：配置名仍是 kebab 键时才用产品文案
-    private static readonly Dictionary<string, (string Label, string English)> PresetLabels = new()
+    private static readonly Dictionary<string, (string LabelKey, string English)> PresetLabels = new()
     {
-        ["read-only"] = ("仅可查看", "Read Only"),
-        ["workspace-write"] = ("工作区内修改", "Workspace Write"),
-        ["danger-full-access"] = ("完全权限", "Full access"),
+        ["read-only"] = ("L.Moe.Permission.ReadOnlyLabel", "Read Only"),
+        ["workspace-write"] = ("L.Moe.Permission.WorkspaceWriteLabel", "Workspace Write"),
+        ["danger-full-access"] = ("L.Moe.Permission.FullAccessLabel", "Full access"),
     };
 
     private static readonly Dictionary<string, string> PresetDescriptions = new()
     {
-        ["read-only"] = ReadOnlyDescription,
-        ["workspace-write"] = WorkspaceWriteDescription,
-        ["danger-full-access"] = FullAccessDescription,
+        ["read-only"] = "L.Moe.Permission.ReadOnlyDescription",
+        ["workspace-write"] = "L.Moe.Permission.WorkspaceWriteDescription",
+        ["danger-full-access"] = "L.Moe.Permission.FullAccessDescription",
     };
 
     private static readonly Dictionary<string, SymbolRegular> PresetIcons = new()
@@ -613,9 +618,9 @@ public partial class MoeViewModel : ObservableObject
 
     private static string PermissionLabelOf(string value, string name)
     {
-        if (value == "auto") return "自动审查";
+        if (value == "auto") return Loc.T("L.Moe.Permission.AutoLabel");
         if (PresetLabels.TryGetValue(value, out var labels) && (name == value || name == labels.English))
-            return labels.Label;
+            return Loc.T(labels.LabelKey);
         return DisplayPresetName(name);
     }
 
@@ -623,7 +628,7 @@ public partial class MoeViewModel : ObservableObject
         PresetIcons.TryGetValue(value, out var icon) ? icon : null;
 
     private static string? PresetDescriptionOf(string value) =>
-        PresetDescriptions.TryGetValue(value, out var description) ? description : null;
+        PresetDescriptions.TryGetValue(value, out var key) ? Loc.T(key) : null;
 
     private static string DisplayPresetName(string name)
     {
@@ -667,14 +672,14 @@ public partial class MoeViewModel : ObservableObject
 
         var confirm = await ShowDialogAsync(new ContentDialog
         {
-            Title = "删除对话",
+            Title = Loc.T("L.Moe.DeleteChatTitle"),
             Content = new System.Windows.Controls.TextBlock
             {
-                Text = $"确定删除「{item.Title}」吗？本地的对话记录会一并删除，且无法恢复。",
+                Text = Loc.F("L.Moe.DeleteChatText", item.Title),
                 TextWrapping = System.Windows.TextWrapping.Wrap,
             },
-            PrimaryButtonText = "删除",
-            CloseButtonText = "取消",
+            PrimaryButtonText = Loc.T("L.Common.Delete"),
+            CloseButtonText = Loc.T("L.Common.Cancel"),
             DialogWidth = 460,
             DialogHeight = 260,
         });
@@ -684,13 +689,13 @@ public partial class MoeViewModel : ObservableObject
 
         await ShowDialogAsync(new ContentDialog
         {
-            Title = "删除失败",
+            Title = Loc.T("L.Moe.DeleteFailedTitle"),
             Content = new System.Windows.Controls.TextBlock
             {
-                Text = "会话文件未能删除，请稍后重试。",
+                Text = Loc.T("L.Moe.DeleteFailedText"),
                 TextWrapping = System.Windows.TextWrapping.Wrap,
             },
-            CloseButtonText = "知道了",
+            CloseButtonText = Loc.T("L.Common.GotIt"),
             DialogWidth = 420,
             DialogHeight = 220,
         });
@@ -699,6 +704,7 @@ public partial class MoeViewModel : ObservableObject
     private async Task<ContentDialogResult> ShowDialogAsync(ContentDialog dialog)
     {
         // 对话框在 WebView2 之上会被 HWND 空域遮住，弹出期间折叠 Web
+        DialogOpenState.IsOpen = true;
         _messenger.Send(new DialogOpenChangedMessage(true));
         try
         {
@@ -706,6 +712,7 @@ public partial class MoeViewModel : ObservableObject
         }
         finally
         {
+            DialogOpenState.IsOpen = false;
             _messenger.Send(new DialogOpenChangedMessage(false));
         }
     }

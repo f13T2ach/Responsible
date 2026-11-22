@@ -1,4 +1,5 @@
 import type { WireMessage } from "./bridge";
+import { t } from "./i18n";
 
 export interface TurnSource {
   readonly user: WireMessage | null;
@@ -96,6 +97,14 @@ export class TurnRail {
     this.updateActive();
   }
 
+  relocalize(): void {
+    this.marks.forEach((mark, index) => mark.setAttribute("aria-label", t("rail.jump", index + 1)));
+    if (this.preview.classList.contains("show")) {
+      this.paintPreview();
+      this.positionPreview();
+    }
+  }
+
   /** Refresh preview text after streaming deltas; no-op while hidden. */
   refreshPreview(): void {
     if (!this.preview.classList.contains("show")) return;
@@ -108,7 +117,7 @@ export class TurnRail {
     mark.type = "button";
     mark.className = "turn-mark";
     mark.dataset.index = String(index);
-    mark.setAttribute("aria-label", `跳转到第 ${index + 1} 轮`);
+    mark.setAttribute("aria-label", t("rail.jump", index + 1));
     mark.addEventListener("pointermove", () => this.hover(index));
     mark.addEventListener("click", () => this.jump(index));
     mark.addEventListener("focus", () => this.hover(index));
@@ -142,9 +151,9 @@ export class TurnRail {
   private paintPreview(): void {
     const turn = this.turns[this.hovered];
     if (!turn) return;
-    const prompt = previewText(turn.user?.text ?? "", "代码");
-    const response = previewText(turn.assistants.map((m) => m.text).join("\n"), "代码块");
-    this.promptEl.textContent = prompt || `第 ${this.hovered + 1} 轮`;
+    const prompt = previewText(turn.user?.text ?? "", t("rail.code"));
+    const response = previewText(turn.assistants.map((m) => m.text).join("\n"), t("rail.codeBlock"));
+    this.promptEl.textContent = prompt || t("rail.turn", this.hovered + 1);
     this.responseEl.textContent = response;
     this.responseEl.style.display = response === "" ? "none" : "";
   }

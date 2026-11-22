@@ -8,7 +8,7 @@ export function renderTex(tex: string, displayMode: boolean): string {
     try {
       return katex.renderToString(tex, { displayMode, strict: "ignore", throwOnError: false });
     } catch {
-      return `<span class="katex-error" style="color:var(--critical)" title="公式解析失败">${escapeTex(tex)}</span>`;
+      return `<span class="katex-error" style="color:var(--critical)" title="Formula parse error">${escapeTex(tex)}</span>`;
     }
   }
 }
