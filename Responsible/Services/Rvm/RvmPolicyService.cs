@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 using Microsoft.Win32;
 
@@ -100,7 +100,8 @@ public sealed class RvmPolicyService : IRvmPolicyService
             return new RvmPolicy(
                 record.NetworkEnabled,
                 record.DevicesEnabled,
-                (record.Devices ?? []).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray());
+                (record.Devices ?? []).Where(name => !string.IsNullOrWhiteSpace(name)).ToArray(),
+                record.JailbreakTest);
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -112,5 +113,6 @@ public sealed class RvmPolicyService : IRvmPolicyService
     private sealed record PolicyRecord(
         bool NetworkEnabled,
         bool DevicesEnabled,
-        IReadOnlyList<string>? Devices);
+        IReadOnlyList<string>? Devices,
+        bool JailbreakTest = false);
 }

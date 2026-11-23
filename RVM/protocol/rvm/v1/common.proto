@@ -64,6 +64,8 @@ message SandboxPolicy {
   repeated string writable_roots = 2;
   bool network_access = 3;
   ApprovalMode approval = 4;
+  // 沙箱强度测试开关：只影响提示词与审计标记，不放宽隔离策略。
+  bool jailbreak_test = 5;
 }
 
 message ContentHash {

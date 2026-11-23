@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -40,6 +40,7 @@ public partial class RvmPenetrationViewModel : ObservableObject
         _loading = true;
         _networkEnabled = policy.NetworkEnabled;
         _devicesEnabled = policy.DevicesEnabled;
+        _jailbreakTest = policy.JailbreakTest;
         _loading = false;
         _loadError = store.LoadError ?? string.Empty;
         RefreshDevices(policy);
@@ -50,6 +51,10 @@ public partial class RvmPenetrationViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _devicesEnabled;
+
+    /// <summary>沙箱强度测试：只切换提示词，隔离策略不变。</summary>
+    [ObservableProperty]
+    private bool _jailbreakTest;
 
     [ObservableProperty]
     private string _statusText = string.Empty;
@@ -64,6 +69,8 @@ public partial class RvmPenetrationViewModel : ObservableObject
     partial void OnNetworkEnabledChanged(bool value) => Persist();
 
     partial void OnDevicesEnabledChanged(bool value) => Persist();
+
+    partial void OnJailbreakTestChanged(bool value) => Persist();
 
     [RelayCommand]
     private void RefreshDevices() => RefreshDevices(_store.Current);
@@ -109,7 +116,8 @@ public partial class RvmPenetrationViewModel : ObservableObject
             _store.Save(new RvmPolicy(
                 NetworkEnabled,
                 DevicesEnabled,
-                Devices.Where(item => item.IsSelected).Select(item => item.Name).ToArray()));
+                Devices.Where(item => item.IsSelected).Select(item => item.Name).ToArray(),
+                JailbreakTest));
             LoadError = string.Empty;
             StatusText = Loc.T("L.Penetration.Saved");
         }

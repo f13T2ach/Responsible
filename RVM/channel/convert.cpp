@@ -196,6 +196,7 @@ core::Result<core::SandboxPolicy> FromProto(const v1::SandboxPolicy& policy) {
   }
 
   result.network_access = policy.network_access();
+  result.jailbreak_test = policy.jailbreak_test();
   result.writable_roots.reserve(static_cast<std::size_t>(policy.writable_roots_size()));
   for (const std::string& root : policy.writable_roots()) {
     core::Result<std::wstring> decoded = FromUtf8(root);

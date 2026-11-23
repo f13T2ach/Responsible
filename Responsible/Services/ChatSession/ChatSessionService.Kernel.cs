@@ -285,8 +285,9 @@ public sealed partial class ChatSessionService
         var pipe = _rvm.PipeName;
         var token = _rvm.Token;
         if (engine is null || pipe is null || token is null) return null;
+        RvmTrace($"binding: jailbreak={_rvmPolicy.Current.JailbreakTest} loadError={_rvmPolicy.LoadError ?? "none"}");
         return new DshRvmBinding(engine, pipe, token, _rvmSessionId, _rvmVirtualRoot,
-            _rvmWorkspaceRoot);
+            _rvmWorkspaceRoot, _rvmPolicy.Current.JailbreakTest);
     }
 
     // 绑定变化（例如首次开启 RVM 隔离保护）必须触发内核重启，否则新进程拿不到 RESPONSIBLE_RVM_TOKEN；

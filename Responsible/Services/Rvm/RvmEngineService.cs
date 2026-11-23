@@ -141,6 +141,7 @@ public sealed class RvmEngineService : IRvmEngineService
         IReadOnlyList<RvmToolAuthorization>? toolAccess = null,
         bool networkEnabled = false,
         IReadOnlyList<string>? devices = null,
+        bool jailbreakTest = false,
         CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -157,6 +158,8 @@ public sealed class RvmEngineService : IRvmEngineService
                 RvmProto.AddVarint(policy, 1, 2); // SANDBOX_MODE_WORKSPACE_WRITE
                 RvmProto.AddVarint(policy, 4, 1); // APPROVAL_MODE_ASK
                 RvmProto.AddBool(policy, 3, networkEnabled); // network_access
+                // 沙箱强度测试开关（policy.jailbreak_test）：引擎记进 facts 与审计，不放宽隔离
+                if (jailbreakTest) RvmProto.AddBool(policy, 5, true);
             });
             // 受保护会话在独立的会话盘上运行：引擎按 git 索引把工作区选择性快照到 RVM 存储，
             // 用 subst 把会话盘挂到空闲盘符，只把会话盘授权给 AppContainer。

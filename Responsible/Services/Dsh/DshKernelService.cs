@@ -834,22 +834,6 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     // 注意“会话没建立”（_rvmUnavailable）是另一回事：那不是配置错误，而是这个工作区
     // 暂时建不出会话盘（例如没有 Git 索引）。此时保留 DSH 自带的 sandbox，让工具照常可用，
     // 只把原因挂在 badge 上——否则整条命令通道会变成“什么都不能跑”。
-    // 临时开关：%LOCALAPPDATA%\\Responsible\\sandbox-probe.flag 存在即视为开启，删掉即关闭
-    private static bool SandboxProbeEnabled()
-    {
-        try
-        {
-            var path = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Responsible", "sandbox-probe.flag");
-            return File.Exists(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
     private string? WritePatch()
     {
         var plugin = ResolvePlugin();
@@ -890,8 +874,8 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
             insert.Add($"        sessionId: {YamlString(rvm.SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
             insert.Add($"        workspaceRoot: {YamlString(rvm.WorkspaceRoot)}");
             insert.Add($"        hostWorkspaceRoot: {YamlString(rvm.HostWorkspaceRoot)}");
-            // 沙箱强度测试开关：flag 文件存在时换成允许主动越界的提示词（策略不放宽）
-            if (SandboxProbeEnabled()) insert.Add("        sandboxProbe: true");
+            // 沙箱强度测试开关：RVM 策略里打开时才换成 jailbreak 提示词（策略不放宽）
+            if (rvm.JailbreakTest) insert.Add("        sandboxProbe: true");
         }
 
         var lines = new List<string>();

@@ -237,7 +237,7 @@ public sealed partial class ChatSessionService
 
         var session = await _rvm.CreateWorkspaceSessionAsync(
                 workspaceCwd, _winFsp.DriveLetter, key, definition.Settings, selectedTools,
-                policy.NetworkEnabled, policy.DevicesEnabled ? policy.Devices : [])
+                policy.NetworkEnabled, policy.DevicesEnabled ? policy.Devices : [], policy.JailbreakTest)
             .ConfigureAwait(false);
         if (session is null)
         {

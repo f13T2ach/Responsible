@@ -14,7 +14,8 @@ public sealed record DshRvmBinding(
     string Token,
     ulong SessionId,
     string WorkspaceRoot,
-    string HostWorkspaceRoot);
+    string HostWorkspaceRoot,
+    bool JailbreakTest = false);
 
 public sealed record DshSessionRow(
     string SessionId,

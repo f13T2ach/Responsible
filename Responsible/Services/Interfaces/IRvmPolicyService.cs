@@ -6,9 +6,11 @@ namespace Responsible.Services;
 public sealed record RvmPolicy(
     bool NetworkEnabled,
     bool DevicesEnabled,
-    IReadOnlyList<string> Devices)
+    IReadOnlyList<string> Devices,
+    // 沙箱强度测试：只在宿主显式打开时切换提示词，隔离策略一条都不放宽
+    bool JailbreakTest = false)
 {
-    public static RvmPolicy Default { get; } = new(false, false, []);
+    public static RvmPolicy Default { get; } = new(false, false, [], false);
 }
 
 public interface IRvmPolicyService

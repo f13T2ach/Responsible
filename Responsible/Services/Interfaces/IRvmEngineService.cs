@@ -1,4 +1,4 @@
-﻿namespace Responsible.Services;
+namespace Responsible.Services;
 
 public sealed record RvmWorkspaceSession(ulong SessionId, string WorkspaceRoot, string VirtualRoot);
 
@@ -59,6 +59,7 @@ public interface IRvmEngineService : IDisposable
         IReadOnlyList<RvmToolAuthorization>? toolAccess = null,
         bool networkEnabled = false,
         IReadOnlyList<string>? devices = null,
+        bool jailbreakTest = false,
         CancellationToken cancellationToken = default);
     Task CloseSessionAsync(ulong sessionId, CancellationToken cancellationToken = default);
 

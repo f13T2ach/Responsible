@@ -126,6 +126,33 @@
                            TextWrapping="Wrap"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
+                <Separator Margin="0,12,0,10"
+                           Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="{DynamicResource L.Rvm.Jailbreak}"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <TextBlock Text="{DynamicResource L.Rvm.JailbreakDesc}"
+                                   FontSize="11.5"
+                                   Margin="0,3,16,0"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                    <ui:ToggleSwitch Grid.Column="1"
+                                     IsChecked="{Binding JailbreakTest}"
+                                     VerticalAlignment="Center" />
+                </Grid>
+
+                <Separator Margin="0,12,0,10"
+                           Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
