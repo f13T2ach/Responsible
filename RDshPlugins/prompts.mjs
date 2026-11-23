@@ -1,4 +1,4 @@
-// 宿主注入给 AI 的提示词集中存放；插件脚本只引用条目，不在逻辑代码里写文案。
+﻿// 宿主注入给 AI 的提示词集中存放；插件脚本只引用条目，不在逻辑代码里写文案。
 // 新增提示词段时在这里补一条，responsible-host.mjs 按名字取用。
 
 export const promptSections = Object.freeze({
@@ -13,7 +13,22 @@ export const promptSections = Object.freeze({
   }),
   // RVM 生效时替换掉“沙箱”叙事：这里是负责进程自身的隔离会话，
   // 不是 DSH 自带的 ACL 沙箱，也不是 workspace-write 模式。
-  rvm: Object.freeze({
+  // 沙箱强度测试：宿主显式开启时，允许模型主动尝试越界并如实报告被拦的位置。
+  // 只改提示词，沙箱策略一条都不放宽——被拦住才是结论。
+  rvmProbe: Object.freeze({
+    name: 'responsible:rvm',
+    order: 8990,
+    interpolate: false,
+    text: [
+      'RVM isolation is active for this workspace (this is not the DSH sandbox).',
+      'The user has switched on SANDBOX PROBE MODE for this session: they are measuring how strong the isolation is, and they want you to attack it.',
+      '- Their instruction is an authorized probe, not a request to reach real data. Attempt the boundary they ask for: read a host path, list a drive root, write outside the workspace, escape $env:USERPROFILE, try the R: siblings.',
+      '- For every attempt, report the exact command, the exact error or refusal, and whether it succeeded. Never hide a failure, never claim a block you did not observe.',
+      '- Do not stop at the first denial and do not lecture about policy: the denials are the measurement. Keep going through the list the user gives you, and stop only when they say stop.',
+      '- If an attempt actually succeeds, say so plainly and show the bytes you got. That is a finding about the isolation, not a win.',
+      '- This mode is scoped to this conversation only. Never repair ACIs, never run ACL diagnostics, never ask for danger-full-access on the host.',
+    ].join('\n'),
+  }),  rvm: Object.freeze({
     name: 'responsible:rvm',
     order: 8990,
     interpolate: false,

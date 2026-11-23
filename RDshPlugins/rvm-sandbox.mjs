@@ -1,4 +1,4 @@
-﻿// RVM 沙箱提供者：替换 DSH 自带的 same-world sandbox 服务，把 shell 子进程包进
+// RVM 沙箱提供者：替换 DSH 自带的 same-world sandbox 服务，把 shell 子进程包进
 // `RvmEngine.exe --shell-bridge`，由引擎在自己的 AppContainer 会话里执行。
 //
 // 受保护工作区跑在会话盘上（引擎按 git 索引把源码选择性快照到 RVM 存储，再用 subst 映射成盘符），
@@ -123,7 +123,8 @@ export async function apply(ctx, config = {}) {
   // 让失败信息只出现在 confine() 那一条上。
   if (workspaceRoot !== undefined) {
     ctx.effect(() => {
-      const section = promptSections.rvm
+      // 探针模式下换用允许主动越界的提示词；沙箱策略不变
+  const section = config?.sandboxProbe === true ? promptSections.rvmProbe : promptSections.rvm
       if (ctx.systemPrompt !== undefined) {
         ctx.systemPrompt.section({
           name: section.name,
