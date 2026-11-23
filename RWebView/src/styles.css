@@ -17,6 +17,61 @@
   --dur: .2s;
 }
 
+/* ---- 设计令牌别名：把 DSH 的 --dsw-alias-* 映射到本文件的调色板，
+       迁移过来的样式片段可以原样使用 ---- */
+:root {
+  color-scheme: dark;
+
+  --dsw-alias-label-primary: var(--text);
+  --dsw-alias-label-secondary: var(--text-2);
+  --dsw-alias-label-tertiary: var(--text-3);
+  --dsw-alias-border-l2: var(--border);
+  --dsw-alias-border-l3: var(--border);
+  --dsw-alias-interactive-bg-hover: var(--surface-2);
+  --dsw-alias-interactive-bg-hover-danger: color-mix(in srgb, var(--critical) 18%, transparent);
+  --dsw-alias-state-success-primary: var(--success);
+  --dsw-alias-state-error-primary: var(--critical);
+  --dsw-alias-state-warn-primary: var(--caution);
+  --dsw-alias-state-warn-secondary: color-mix(in srgb, var(--caution) 55%, transparent);
+  --dsw-alias-state-warn-tertiary: color-mix(in srgb, var(--caution) 16%, transparent);
+  --dsw-alias-file-diff-added-bg: color-mix(in srgb, var(--success) 12%, transparent);
+  --dsw-alias-file-diff-deleted-bg: color-mix(in srgb, var(--critical) 12%, transparent);
+  --dsw-alias-file-diff-added-gutter: color-mix(in srgb, var(--success) 20%, transparent);
+  --dsw-alias-file-diff-deleted-gutter: color-mix(in srgb, var(--critical) 20%, transparent);
+  --dsw-alias-file-diff-added-marker: var(--success);
+  --dsw-alias-file-diff-deleted-marker: var(--critical);
+  --dsw-alias-scrollbar-bg-l2: var(--scroll-thumb);
+  --dsw-alias-scrollbar-hover-l2: var(--scroll-thumb-hover);
+  --dsw-radius-sm: 4px;
+  --dsw-radius-xl: 14px;
+  --dsw-shadow-lv2: 0 8px 24px rgba(0, 0, 0, .4);
+  --dsw-elevation-panel: 0 12px 32px rgba(0, 0, 0, .45);
+  --ds-font-family-code: var(--mono);
+  --dsh-chat-content-width: 880px;
+}
+
+/* ---- 滚动条统一暗色（Chromium 的默认亮色太跳） ---- */
+:root {
+  /* 跟随主题文字色：深色主题偏灰亮，浅色主题偏深灰 */
+  --scroll-thumb: color-mix(in srgb, var(--text-3) 55%, transparent);
+  --scroll-thumb-hover: color-mix(in srgb, var(--text-3) 80%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 * { box-sizing: border-box; }
 
 html, body {
@@ -1431,9 +1486,9 @@ html, body {
 
 .sidebar-toggle {
   position: absolute;
-  top: 6px;
-  right: 10px;
-  z-index: 20;
+  top: 8px;
+  right: 12px;
+  z-index: 30;
   display: inline-flex;
   align-items: center;
   justify-content: center;

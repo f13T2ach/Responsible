@@ -202,7 +202,8 @@ public sealed record HostAgentState(string State)
 public sealed record DiffRequest(int Turn, string? Path, int? Index = null);
 
 public sealed record WebMessage(string Type, int? Protocol = null, string? Text = null, string? Id = null,
-    string? Href = null, int? Turn = null, string? Path = null, int? Index = null);
+    string? Href = null, int? Turn = null, string? Path = null, int? Index = null,
+    string? Message = null);
 
 public static class WebBridge
 {

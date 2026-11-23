@@ -139,7 +139,8 @@ export type WebMessage =
   | { type: "openLink"; href: string }
   | { type: "showDiff"; turn: number; path?: string; index?: number }
   | { type: "approval.answer"; id: string; text: "allowed-once" | "rejected" }
-  | { type: "files.request" };
+  | { type: "files.request" }
+  | { type: "clientError"; message: string };
 
 export const defaultPalette: Palette = {
   bg: "#202020",
@@ -193,6 +194,8 @@ function dispatch(msg: HostMessage): void {
 window.rwebReceive = (payload) => dispatch(typeof payload === "string" ? JSON.parse(payload) : payload);
 
 export function applyPalette(theme: "dark" | "light", colors: Palette): void {
+  // 让原生控件（滚动条、输入框）跟随主题
+  document.documentElement.style.colorScheme = theme;
   const root = document.documentElement;
   root.dataset.theme = theme;
   const vars: Record<string, string> = {

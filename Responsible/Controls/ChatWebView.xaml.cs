@@ -121,6 +121,12 @@ public partial class ChatWebView : UserControl
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsZoomControlEnabled = false;
         core.WebMessageReceived += OnWebMessage;
+        // 前端报错默认看不见：把 window.onerror 与未处理 rejection 转发到宿主日志
+        core.WebMessageReceived += (_, args) =>
+        {
+            var raw = args.TryGetWebMessageAsString();
+            if (raw is { Length: > 0 } && raw.Contains("\"type\":\"clientError\"")) WebLog("client: " + raw);
+        };
         Web.NavigationCompleted += OnNavigationCompleted;
 
         // 导航前落背景色：首帧即与内容区同色，避免白闪

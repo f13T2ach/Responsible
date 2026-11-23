@@ -1,4 +1,4 @@
-﻿import { useSyncExternalStore } from "react";
+﻿import { Component, useSyncExternalStore, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { sidebarStore, type SidebarTab } from "./store";
 import { t } from "../i18n";
@@ -97,8 +97,26 @@ function SidebarBody() {
   );
 }
 
+// 侧栏是独立 React 树：出错时把原因显示出来，否则只会静默消失
+class SidebarBoundary extends Component<{ children: ReactNode }, { error?: string }> {
+  state: { error?: string } = {};
+  static getDerivedStateFromError(error: unknown): { error: string } {
+    return { error: String(error) };
+  }
+  render() {
+    if (this.state.error !== undefined) {
+      return <div className="sidebar-placeholder">sidebar error: {this.state.error}</div>;
+    }
+    return this.props.children;
+  }
+}
+
 export function mountSidebar(host: HTMLElement): void {
-  createRoot(host).render(<SidebarBody />);
+  createRoot(host).render(
+    <SidebarBoundary>
+      <SidebarBody />
+    </SidebarBoundary>,
+  );
 }
 
 /** 右上角的展开按钮：挂到对话区顶部，和 DSH 一样常驻。 */

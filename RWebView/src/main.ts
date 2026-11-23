@@ -23,8 +23,12 @@ const stats = new StatsView(chatColumn);
 const history = new HistoryView(chatColumn);
 // 审批卡片悬浮在对话区底部；RVM 会话的请求在宿主侧就被拒绝，不会走到这里
 const approvalDock = new ApprovalDock(document.body);
-mountSidebar(sidebarHost);
 mountSidebarToggle(chatColumn);
+try {
+  mountSidebar(sidebarHost);
+} catch (error) {
+  sidebarHost.textContent = "sidebar mount error: " + String(error);
+}
 // 改动 diff 在右侧栏里渲染（与 DSH 的 review 标签同一语义）
 function openReview(changes: WireChanges, index: number): void {
   sidebarStore.openTab({
@@ -89,6 +93,10 @@ function refreshStreaming(): void {
   });
   stats.update(lastStats, streaming, agentRunning);
 }
+
+// 前端异常转发给宿主日志（WebView 里看不到 console）
+window.addEventListener("error", event => send({ type: "clientError", message: `${event.message} @ ${event.filename}:${event.lineno}` }));
+window.addEventListener("unhandledrejection", event => send({ type: "clientError", message: String(event.reason) }));
 
 const connected = connect();
 
