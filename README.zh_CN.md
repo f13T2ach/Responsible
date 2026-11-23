@@ -3,7 +3,7 @@
 
 试着对模型的每一响应负责。
 
-严格的 Agent 文件隔离 Harness
+严格的文件隔离 Agent 与 Harness 实现
 
 <p>
   <a href="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml"><img alt="build-release" src="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml/badge.svg?branch=main"></a>
