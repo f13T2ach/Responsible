@@ -1,287 +1,442 @@
-# Responsible 发行构建指南（给接手的人/模型）
+# Responsible Release Guide
 
-> 这份文档是为避免重复已经发生过的灾难而写的。**先读完再动手。**
-> 上一轮构建把一个 100GB 可用空间的磁盘吃到 50GB 以下，删了 20 多分钟，原因全部在下面"陷阱"里。
+**English** | [简体中文](BUILD-GUIDE.zh_CN.md)
+
+> Read this before running anything.
+>
+> An earlier attempt to assemble the release on a workstation ate a 100 GB disk down to
+> 50 GB. That is why the release is built on **GitHub Actions**, and why this guide leads
+> with CI instead of a local script.
 
 ---
 
-## 零、现在怎么构建（现行流程）
+## Contents
 
-本机**不再**跑整包构建，只在改到原生代码时构建 RVM / RTray：
+1. [What gets built](#1-what-gets-built)
+2. [Deploy with GitHub Actions (default)](#2-deploy-with-github-actions-default)
+3. [Local deployment](#3-local-deployment)
+4. [How the pipeline is put together](#4-how-the-pipeline-is-put-together)
+5. [Verifying a build](#5-verifying-a-build)
+6. [Known failure modes](#6-known-failure-modes)
+7. [Maintenance](#7-maintenance)
 
-| 在哪 | 做什么 |
-| --- | --- |
-| 本机 | `.\build-release.ps1` → 只构建 RVM、RTray（Release），产物落到 `natives\win-x64\` 并提交 |
-| GitHub Actions | `.github/workflows/build-release.yml` → 前端、内核（pnpm）、WPF publish、组装、剪平台、2GB 体积锁、zip、上传 artifact |
+---
 
-理由：本地磁盘只有 130GB 可用，而 `pnpm install` 一次就要 8GB store + 5GB hoisted；
-GitHub 的 Windows runner 是干净且随用随弃的，装坏了丢掉重跑即可。
+## 1. What gets built
 
-下面的陷阱清单仍然有效——它们解释了为什么本机不要碰内核依赖树，也解释了
-CI 组装脚本（`scripts/Build-ReleasePackage.ps1`）为什么用 tar 而不是 robocopy。
+One artifact, `Responsible-<version>-win-x64.zip`, produced by
+[`.github/workflows/build-release.yml`](.github/workflows/build-release.yml).
 
-## 一、目标
-
-产出一个 **Windows x64 自包含**发行包，版本 `0.0.1-beta`：
-
-| 组件 | 来源 | 说明 |
+| Item | Size | Notes |
 | --- | --- | --- |
-| `Responsible.exe` | `Responsible/`（WPF, net10.0-windows） | `dotnet publish -c Release -r win-x64 --self-contained true` |
-| `node\node.exe` | 本机 node（v24+） | 便携运行时，宿主的 `ResolveNodeExecutable()` 会优先用它 |
-| `RDshCore/` | `RDshCore/`（DSH 内核） | **只用构建产物 `lib/` + 运行期依赖**，不带 GUI 客户端/站点/基准 |
-| `RDshPlugins/` | `RDshPlugins/` | 宿主注入内核的插件 |
-| `RvmEngine.exe` + 3 个 MinGW DLL | `RVM/build/bin/` | `libgcc_s_seh-1.dll`、`libstdc++-6.dll`、`libwinpthread-1.dll` |
-| `RTray.exe` | `RTray/build/bin/` | 看护进程 |
-| `RWebView/` | `RWebView/dist/` | 对话区与右侧栏前端 |
+| Extracted tree | **~1,067 MB** | hard limit 2,048 MB |
+| Zip | **~374 MB** | what you download |
+| Files | ~46,000 | 6,801 directories, zero symlinks/junctions |
+| CI wall time | ~15 min | kernel build is ~8 min of it |
 
-**用户要求**
+Contents:
 
-1. 最终包 **≤ 2GB**（硬上限，超了立刻中止并清理）
-2. 每 **60 秒**检查一次进度，禁止长时间不管
-3. 禁止长时间占用大量磁盘、禁止产生海量临时文件
-4. **先读文档再构建**，不要凭猜测试错
-5. **禁止**把其它平台（darwin/linux/arm64…）的原生包打进发行包
+| Component | Source | Built by |
+| --- | --- | --- |
+| `Responsible.exe` + .NET runtime | `Responsible/` (WPF, `net10.0-windows`) | CI (`dotnet publish -r win-x64 --self-contained`) |
+| `RDshCore/` | `RDshCore/` submodule | CI (`pnpm install`, `pnpm run build`, then a hoisted production closure) |
+| `RWebView/` | `RWebView/` | CI (`npm ci` + `node build.mjs`) |
+| `RDshPlugins/` | `RDshPlugins/` | CI (copied) |
+| `node/node.exe` | Node 24 from the runner | CI (copied) |
+| `RvmEngine.exe`, `RTray.exe`, 3 MinGW DLLs | `RVM/`, `RTray/` | **you, locally** — committed under `natives/win-x64/` |
+
+Three rules the pipeline enforces, because each one used to be violated:
+
+1. **≤ 2 GB extracted.** The script measures the tree before packaging and fails with a
+   per-directory breakdown if it is over.
+2. **Windows-only native packages.** Anything matching `-darwin-`, `-linux-`, `-arm64-`,
+   … is removed.
+3. **No symlinks or junctions in the artifact.** A Windows user with a normal account
+   cannot recreate them when unzipping, so the tree is materialized into real files.
 
 ---
 
-## 二、陷阱清单（每一条都真实发生过）
+## 2. Deploy with GitHub Actions (default)
 
-### 陷阱 1：`node_modules` 不是普通目录树
+This is the supported path. Nothing but the two native binaries is built on your machine.
 
-`RDshCore/node_modules` 是 pnpm 的**硬链接 + 符号链接**结构：
+### 2.1 One-time prerequisites
 
-- 真实内容只在 `node_modules/.pnpm/<pkg>@<ver>/node_modules/<pkg>` 存一份
-- `node_modules/<pkg>` 和各级依赖都是指向它的**硬链接**
-- `node_modules/@deepseek-ai/*` 是指回 `packages/*` 的**符号链接**，而 `packages/*/node_modules` 又指回来 —— **成环**
-
-**由此产生的三个灾难：**
-
-| 操作 | 后果 |
+| Requirement | Why |
 | --- | --- |
-| `robocopy /E` 复制 | 把每个硬链接展开成独立文件：2.5GB → **10GB+ / 100 万文件** |
-| `robocopy /E` 或 `/MIR` 遍历 | 跟随符号链接环，**卡死 40 分钟以上** |
-| `Remove-Item -Recurse` / `rd /s /q` | 同样跟随环，删除要 **20+ 分钟** |
+| Private repo works fine | the runner clones it with the app's own token |
+| Submodule `RDshCore` = `deepseek-ai/deepseek-harness` | public, so the runner clones it anonymously |
+| `natives/win-x64/` committed | the five native files; see [§7.2](#72-rebuild-the-native-components) |
 
-**正确做法**：**不要试图归档这棵树**。`tar` 会跟着 junction 递归（本地把 `vendor/*`
-的自指链走到路径超长报错，CI 上直接把 `C:\Windows\system32\tar.exe` 跑到
-`0xC0000005` access violation），`robocopy /E` 会把硬链接展开成几十万份独立文件。
-
-真正可行的是让 pnpm 直接给出**真文件布局**，再逐文件硬链接进发行树：
+Check the submodule points at a commit that still exists upstream:
 
 ```powershell
-# 1) 构建仍用默认 isolated 布局（已验证能过）
-pnpm install --frozen-lockfile; pnpm run build
-
-# 2) 复制一份不含 node_modules 的源码到 dist\_kernel-stage，
-#    在它的 pnpm-workspace.yaml 里加 nodeLinker: hoisted，
-#    再装 CLI 的生产闭包。不要在旧布局上原地切 linker：
-#    那样 pnpm 会去删旧的 workspace 链接并报 EPERM。
-pnpm install --prod --frozen-lockfile --ignore-scripts `
-    --filter "@deepseek-ai/dsh..." --os=win32 --cpu=x64
-
-# 3) scripts/Materialize-KernelTree.mjs 把剩下的链接物化成真目录/真文件
-#    （文件用同卷硬链接，保住 pnpm 的去重），并排除除根以外的所有 node_modules
+git submodule status          # e.g. " 2e39e70496... RDshCore (heads/master)"
 ```
 
-实测：物化 6801 个目录 / 59179 个文件 / 0 个环 / 1.01GB，剪完源码映射 1.07GB。
+### 2.2 Trigger a build
 
-### 陷阱 2：`pnpm install` 必然建 store（这是体积大头）
-
-```
-D:\.pnpm-store          ~8 GB      ← pnpm 的内容寻址存储，装一次必建
-node_modules (hoisted)  ~5 GB      ← 平铺后是实体，不是链接
-```
-
-`--config.package-import-method=copy`（DSH 官方打包用的就是这个）只是让包复制进 `node_modules`，**不省 store**。删掉 store 再重装 = 重新下一遍。
-
-**峰值 17GB 的构成**：store 8G + hoisted node_modules 5G + publish 0.2G + 复制 1.5G + pnpm 临时 2G。
-
-**正确做法**：**不要跑 `pnpm install`**。`RDshCore/node_modules` 已经在你机器上了，用 tar 归档它。
-
-### 陷阱 3：`job_kill` / `Stop-Job` 不杀子进程
-
-这是最致命的一条：
-
-```
-pid=12956  robocopy.exe  CPU=5812s(97分钟)  启动 16:50:58
-```
-
-一条 `robocopy /MIR 空目录` 命令被 `job_kill` 之后，**robocopy.exe 仍在后台跑了 97 分钟**，持续遍历目录树、持续写盘。结果是：每次删完文件，它又制造写入，`D:` 可用空间**边删边降**（130GB → 101GB），看起来像"越删越少"。
-
-当时我错误地怀疑了 VSS 卷影副本，用户查了：**D 盘没有卷影副本**，判断错误。
-
-**正确做法**：
+**Automatically** — push to `main`:
 
 ```powershell
-# 每次启动后台任务后，都要能查到它的真实进程
-Get-Process robocopy,xcopy -ErrorAction SilentlyContinue | Select-Object Id,CPU,StartTime
-Get-Process robocopy,xcopy -ErrorAction SilentlyContinue | Stop-Process -Force
+git add -A
+git commit -m "your change"
+git push
 ```
 
-`Start-Process -PassThru` 会返回真实进程对象，用它判断存活；**不要只信 job 状态**。
+`.md`-only pushes are ignored on purpose (`paths-ignore: '**.md'`), so editing docs does
+not burn a 15-minute Windows runner.
 
-### 陷阱 4：量体积不要递归扫目录
+**Manually** — Actions → **build-release** → *Run workflow* → optionally set `version`.
 
-`Get-ChildItem -Recurse | Measure-Object Length -Sum` 在 90k 文件 + 链接环上要几分钟，而且会被环拖死。
+**While a build runs**, a second push queues behind it (`concurrency.group` with
+`cancel-in-progress: false`); it will not run in parallel.
 
-**正确做法**：用驱动器空闲差值，瞬时完成。
+### 2.3 Watch it
 
-```powershell
-$baseline = (Get-PSDrive D).Free
-$used = $baseline - (Get-PSDrive D).Free     # 构建增量
-if ($used -gt 2GB) { 中止并清理 }
-```
+Actions → the run → job *Windows x64 package*. It has three named steps so you can see
+where it is:
 
-### 陷阱 5：删除慢 / 删不掉
+| Step | Typical | What it does |
+| --- | --- | --- |
+| `1. 前端（RWebView）` | 5 s | `npm ci`, `node build.mjs` |
+| `2. 内核（DSH CLI 闭包）` | ~11 min | kernel install + build + hoisted production closure |
+| `3. 组装发行包` | ~4 min | publish, materialize, smoke test, trim, size gate, zip |
 
-- `Remove-Item -Recurse` 跟随符号链接，遇环卡死
-- Python `shutil.rmtree(..., ignore_errors=True)` **会静默失败**（权限/环），你以为删了其实还在
-- `rd /s /q` 不跟随链接，但**慢**（760MB / 90k 文件约 10–15 分钟），且**不要中途打断**——打断后空间不会马上回来
+### 2.4 Get the artifact
 
-**正确做法**：`rd /s /q` 前台跑到底，用 `Start-Process -PassThru` 拿 PID 轮询，每 60 秒报一次空间。实测从 101GB 回到 130GB 用了约 12 分钟。
+Actions → the finished run → **Artifacts** → `Responsible-<version>-win-x64`.
 
-### 陷阱 6：`npx pnpm ...` 的参数会被 npm 吃掉
+- Retained **30 days**.
+- `version.txt` inside records the commit SHA, so you can tell two builds apart.
 
-`npx --yes pnpm@11 install --os=win32 --cpu=x64` 里的 `--os` 会被 npm 当成自己的配置，报 `npm warn Unknown config options`，PowerShell 5.1 还会把它当**终止错误**导致脚本 `exit 1`。
+Extract it **with the extracted-folder name intact**; the host looks for
+`<dir>\RDshCore\apps\cli\lib\bin.js` relative to itself.
 
-**正确做法**：平台过滤不靠命令行参数，装完按目录名删：
+### 2.5 Change the version
 
-```powershell
-$platforms = "-(darwin|linux|freebsd|android|armv7|ia32|ppc64|s390x|loong64|riscv64)-"
-Get-ChildItem node_modules -Directory | Where-Object { $_.Name -match $platforms } | Remove-Item -Recurse -Force
-```
+Two places, keep them in sync:
 
-需要临时降级错误处理时：
+- `.github/workflows/build-release.yml` → `workflow_dispatch.inputs.version.default`
+  and the `inputs.version || '…'` fallbacks
+- `scripts/Build-ReleasePackage.ps1` → `[string]$Version = '…'`
 
-```powershell
-$prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-try { & npx ... } finally { $ErrorActionPreference = $prev }
-```
+### 2.6 If the size gate trips
 
-### 陷阱 7：DSH 官方包 1GB 是怎么来的
+`Assert-UnderLimit` prints the per-directory breakdown, then fails the run. The two usual
+causes:
 
-`RDshCore/apps/desktop/README.md:104`：
-
-> `electron-builder` copies only the manifest's `dependencies` into `app.asar/node_modules`
-
-打包入口 `apps/desktop/scripts/package-target.ts`，准备阶段 `prepare-dsh.ts`，包集合白名单在 `apps/desktop/src/core-package-set.ts`。它 **1GB = Electron/Chromium + 按 dependencies 闭包装出来的 asar**，不是整棵仓库复制。
-
-我们的宿主是 WPF、不走 Electron，所以**只装内核 CLI 的依赖闭包**才是对应做法：
-
-```powershell
-pnpm install --prod --frozen-lockfile --ignore-scripts --filter "@deepseek-ai/dsh..."
-```
-
-**已验证：这样装出来是 760MB。**
+- nested `node_modules` were not excluded during materialization (see §6.4)
+- non-Windows platform packages were reinstalled
 
 ---
 
-## 三、已验证的数据（2026-11-23 CI 实测）
+## 3. Local deployment
 
-| 项 | 值 |
+Two different goals, two different procedures. **Do not** run the packaging script on a
+small system drive.
+
+### 3.1 Run from source (normal development loop)
+
+This is the fast loop: the kernel and the app run from the working tree, no packaging.
+
+```powershell
+# 1. natives (only needed once, or when RVM/RTray sources change)
+.\build-release.ps1                  # -> natives\win-x64\
+
+# 2. kernel dependencies + build
+cd RDshCore
+pnpm install --frozen-lockfile       # first run downloads a lot; needs ~10 GB free
+pnpm run build                       # ~8 min, produces apps\cli\lib\bin.js
+cd ..
+
+# 3. front end
+cd RWebView
+npm ci
+node build.mjs
+cd ..
+
+# 4. run the app
+dotnet run --project Responsible\Responsible.csproj
+```
+
+Toolchain required:
+
+| Tool | Version | Note |
+| --- | --- | --- |
+| Node.js | ≥ 24.9 | the kernel's `engines` field says so |
+| pnpm | 11.28.5 | `corepack enable`; the repo pins it in `packageManager` |
+| .NET SDK | 10.x | WPF `net10.0-windows` |
+| MinGW-w64 g++ | C++20 | for `RVM` / `RTray`; the MSVC toolchain also works |
+| CMake | ≥ 4.3 | both `CMakeLists.txt` declare `cmake_minimum_required(VERSION 4.3)` |
+| Ninja | any | recommended generator |
+
+When running from source, the host falls back to `node` on `PATH`; in a package it
+prefers `node\node.exe` next to `Responsible.exe`.
+
+### 3.2 Build the full package locally (heavy)
+
+Only do this when you cannot wait for CI. **Budget ~15–20 GB of free disk**, and never
+do it on a drive with less than that.
+
+```powershell
+# pick a disk with room first
+Get-PSDrive D | Select-Object Used,Free
+
+.\scripts\Build-ReleasePackage.ps1 -Phase frontend
+.\scripts\Build-ReleasePackage.ps1 -Phase kernel      # heaviest: store + build + closure
+.\scripts\Build-ReleasePackage.ps1 -Phase package     # publish + materialize + zip
+
+# result
+dist\Responsible-<version>-win-x64.zip
+```
+
+Disk accounting for the worst case:
+
+| What | Size |
 | --- | --- |
-| 内核安装（isolated，含 dev） | 1 分 24 秒 |
-| 内核构建（`pnpm run build`，10 个 gate） | 452 秒 |
-| 内核发行闭包（stage + hoisted） | 约 2 分钟 |
-| 物化（6801 目录 / 59179 文件 / 0 环） | 1.01 GB |
-| 内核进包（剪掉源码映射后） | **1067 MB** |
-| WPF self-contained publish + node + 原生 + 前端 | 合计约 1.07 GB |
-| **zip** | **374 MB** |
-| CI 端到端 | 约 13–14 分钟 |
+| pnpm content store (`%LOCALAPPDATA%\pnpm\store`) | ~8 GB |
+| `RDshCore\node_modules` (isolated, with dev deps) | ~2.5 GB |
+| `dist\_kernel-stage` (hoisted production closure) | ~1.5 GB |
+| `dist\Responsible-…` (the tree) | ~1.07 GB |
+| `dist\*.zip` | ~0.37 GB |
 
-参照：pnpm 的 isolated 闭包 = 414 个包 / 93912 文件 / 逻辑 1249MB；
-hoisted 下各项目自己的 `node_modules` 是冗余的，物化时必须排除，
-否则会变成 346102 个文件 / 3.5GB（实测）。
-
-参照：pnpm 实测 `--filter` 闭包 = 414 个包 / 93912 文件 / 逻辑 1249MB。
-
----
-
-## 四、推荐执行顺序
+Clean up afterwards — **with `rd`, never `Remove-Item -Recurse`** (the latter follows
+junctions and can walk for tens of minutes):
 
 ```powershell
-# 0. 前置检查（缺一个就停）
-Test-Path RDshCore\apps\cli\lib\bin.js      # 内核必须已构建
-Test-Path RDshCore\node_modules             # 依赖必须在位
-Test-Path RVM\build\bin\RvmEngine.exe
-Test-Path RTray\build\bin\RTray.exe
-Test-Path RWebView\dist\index.html
-
-# 1. 前端（秒级）
-cd RWebView; node build.mjs
-
-# 2. 原生（已有产物可跳过）
-cmake --build RVM\build
-cmake --build RTray\build
-
-# 3. WPF（1–2 分钟）
-dotnet publish Responsible\Responsible.csproj -c Release -r win-x64 `
-  --self-contained true -p:PublishReadyToRun=false -p:DebugType=none `
-  -p:Version=0.0.1-beta -o dist\Responsible-0.0.1-beta-win-x64
-
-# 4. 内核：tar 归档 → 解包（不跑 install，不建 store）
-tar -cf dist\rdsh.tar -C RDshCore --exclude=./src --exclude=./tests `
-    --exclude=./website --exclude=./benchmarks --exclude=./.git .
-tar -xf dist\rdsh.tar -C dist\Responsible-0.0.1-beta-win-x64\RDshCore
-
-# 5. 剪掉非 Windows 平台包（见陷阱 6）
-
-# 6. 复制 node / RWebView / RDshPlugins / RvmEngine + DLL / RTray
-
-# 7. 校验 ≤2GB，然后 zip
+cmd /c rd /s /q dist
+cmd /c rd /s /q RDshCore\node_modules
+pnpm store prune                      # or delete %LOCALAPPDATA%\pnpm\store
 ```
 
-**每完成一步，用 `Get-PSDrive D` 差值算一次增量，超过 2GB 立即 `rd /s /q dist` 并停止。**
+If a build is interrupted, deleting is still the right move; `rd` is slow but it does
+return the space. Do not interrupt `rd` and conclude "the space never came back".
+
+### 3.3 Only rebuild the natives
+
+`.\build-release.ps1` builds `RVM` and `RTray` in Release with MinGW and copies the
+binaries plus the three runtime DLLs into `natives\win-x64\`. Add `-Force` to reconfigure
+from scratch. Commit the result so CI ships it.
 
 ---
 
-## 五、绝对禁止
+## 4. How the pipeline is put together
 
-1. ❌ 对 `RDshCore`、`node_modules`、`dist` 用 `robocopy` / `Copy-Item -Recurse` / `Remove-Item -Recurse`
-2. ❌ 在 `RDshCore` 里跑 `pnpm install`（会重建 8GB store）
-3. ❌ 用 `Get-ChildItem -Recurse` 统计体积或文件数
-4. ❌ 启动后台任务后就撒手不管（必须每 60s 查一次，且查**真实进程**）
-5. ❌ 把 `.pnpm` 里所有平台的原生包装进包
-6. ❌ 中途打断 `rd` 然后判断"空间没回来"——它会回来的，等它跑完
-7. ❌ 在没算清峰值之前就开始跑
+```
+.github/workflows/build-release.yml     three steps, one job, windows-latest
+scripts/Build-ReleasePackage.ps1        the actual work (-Phase frontend | kernel | package | all)
+scripts/Materialize-KernelTree.mjs      turns pnpm's link layout into real files
+build-release.ps1                       local-only: RVM + RTray -> natives\win-x64
+natives/win-x64/                        committed native binaries, CI input
+```
+
+### 4.1 Why the kernel needs a second install
+
+`pnpm run build` needs devDependencies, so the first install is a normal (isolated)
+install. That layout is a forest of junctions — impossible to ship in a zip. The packaging
+step therefore:
+
+1. builds in place with the isolated layout (`apps/cli/lib/bin.js` comes out of this)
+2. `robocopy`s the tree without `node_modules` into `dist\_kernel-stage`
+3. appends `nodeLinker: hoisted` to **that copy's** `pnpm-workspace.yaml` (the submodule
+   stays untouched) and installs the CLI production closure there
+4. materializes the result into `dist\Responsible-…\RDshCore`
+
+Do not try to flip `nodeLinker` inside the existing install — pnpm tries to remove the
+old workspace links and fails with `EPERM` (see §6.2).
+
+### 4.2 What `Materialize-KernelTree.mjs` guarantees
+
+- files are hard-linked into the destination (same volume), so pnpm's dedup survives
+- symlinks and junctions are resolved and copied as **real directories/files**
+- any `node_modules` below the root is skipped — those are redundant in a hoisted layout,
+  and copying them is what once produced 346,000 files
+- leftover dangling links are dropped and counted
+
+Exit code is 0 with counters on stdout; the packaging step fails on a non-zero code and
+prints the counters.
+
+### 4.3 Guards inside the packaging step
+
+| Guard | Catches |
+| --- | --- |
+| `--help` smoke test of the materialized kernel | pruned a package the kernel actually needs |
+| assertion that `@deepseek-ai/dsh-sandbox` and `dsh-session-stats` exist | the class of bug in [§6.5](#65-packaged-app-sits-on-loading-session-forever--runtime-exited) |
+| `Assert-UnderLimit` (2 GB) | runaway installs |
+| platform-package trim | shipping darwin/linux native binaries |
 
 ---
 
-## 六、当前代码状态（2026-11-23 起可跑通）
+## 5. Verifying a build
 
-- `build-release.ps1`：本机只构建 RVM / RTray（MinGW Release），产物进 `natives\win-x64\`
-- `.github/workflows/build-release.yml`：三步——前端 / 内核 / 组装，产出 artifact
-- `scripts/Build-ReleasePackage.ps1`：CI 组装脚本，带 2GB 体积锁、内核冒烟测试
-- `scripts/Materialize-KernelTree.mjs`：把 pnpm 的链接物化成真文件树（含环的处理）
+**Before shipping**, in the CI log:
 
-已经跑通一轮：1067MB 目录 / 374MB zip / 0 个环 / 内核 `--help` 正常。
+- `内核物化完成: ~1,067 MB` and `--help 正常`
+- `完成：目录 1,067 MB / zip 374 MB（上限 2,048 MB）`
+
+**After unzipping**, on a machine:
+
+```powershell
+# 1. kernel answers on its own
+node RDshCore\apps\cli\lib\bin.js --help
+
+# 2. nothing in the tree is a link
+(Get-ChildItem . -Recurse -Force | Where-Object {
+    $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count    # must be 0
+
+# 3. which commit is this
+Get-Content version.txt
+```
+
+**After launching the app**, the host writes a trace that answers "did it really start?":
+
+```powershell
+Get-Content "$env:LOCALAPPDATA\Responsible\logs\rvm-session.log" -Tail 20
+```
+
+Healthy looks like:
+
+```
+ensure cwd=… protected=True
+ensure: engine up 143ms
+ensure: session created 5607ms
+ensure: ready root=R:\My Documents_750ca0\ id=1
+```
+
+A repeating `warm: restarting kernel with the RVM binding` every ~120 ms is the failure
+mode in [§6.5](#65-packaged-app-sits-on-loading-session-forever--runtime-exited).
 
 ---
 
-## 七、给接手者的第一条建议
+## 6. Known failure modes
 
-**不要再试着归档 `RDshCore`。** 那条路已经证伪：`tar` 会跟着 junction 递归，
-CI 上直接把 `C:\Windows\system32\tar.exe` 跑到 access violation。
+Every entry below has actually happened.
 
-要验证环境是否就绪，先只跑最小的一步——确认内核能构建、能启动：
+### 6.1 `tar` dies with `-1073741819` (0xC0000005)
+
+**Symptom** — packaging fails at the archive step; `bsdtar` access-violates.
+
+**Cause** — `C:\Windows\system32\tar.exe` follows pnpm's junctions into cycles. It also
+cannot be fixed with `--exclude`.
+
+**Fix** — do not archive the tree at all. Use the hoisted install plus
+`Materialize-KernelTree.mjs` ([§4.1](#41-why-the-kernel-needs-a-second-install)). `robocopy /E`
+is not an alternative either: it expands the hard links into hundreds of thousands of
+duplicate files.
+
+### 6.2 `EPERM rmdir …node_modules\@deepseek-ai`
+
+**Symptom** — switching `nodeLinker` in place fails inside
+`unlinkPriorWorkspaceHoists`.
+
+**Cause** — pnpm tries to delete workspace links that Windows still has open.
+
+**Fix** — never flip `nodeLinker` in an existing install; install in a clean staging
+directory instead.
+
+### 6.3 `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`
+
+**Symptom** — `injectWorkspacePackages` cannot be used with `--frozen-lockfile`.
+
+**Cause** — the lockfile records the previous setting.
+
+**Note** — `injectWorkspacePackages` did *not* actually remove workspace symlinks when
+combined with `--filter`, so it was dropped rather than working around the lockfile
+conflict.
+
+### 6.4 346,000 files / 3.5 GB after materializing
+
+**Symptom** — `bytes` around 3.5 GB in the materialize counters; size gate trips.
+
+**Cause** — every workspace project has its own `node_modules` in a hoisted layout, all
+pointing back at the root. Copying them duplicates the whole closure.
+
+**Fix** — skip every `node_modules` below the root (already implemented). Result:
+59,179 files / 1.01 GB.
+
+### 6.5 Packaged app sits on "loading session" forever + "Runtime exited"
+
+**Symptom** — the sidebar never finishes loading, the status flickers
+`Runtime exited`, and `rvm-session.log` repeats `warm: restarting kernel` every ~120 ms.
+
+**Cause** — the host resolves the RVM takeover modules at
+`<RDshCore>\packages\sandbox\sandbox\lib\index.js`, which only exists in a development
+tree. A packaged tree has `node_modules` only, so `WritePatch()` returned "sandbox module
+was not found", the kernel failed to start within milliseconds, `_startedRvmKey` was never
+set, and every session open triggered another restart.
+
+**Fix** — `ResolveSandboxModule()` / `ResolveStatsPlugin()` now look in
+`node_modules/@deepseek-ai/<pkg>/lib/index.js` first and fall back to `packages/…`.
+If you touch those resolvers, keep both branches, and keep the assertion in
+`Build-ReleasePackage.ps1` that both packages exist in the release tree.
+
+### 6.6 Session list returns HTTP 502
+
+**Symptom** — `logs\approval.log` shows `Bridge endpoint returned 502`; the conversation
+list stays empty.
+
+**Cause** — the host's bridge client used the default `HttpClient` handler. On a machine
+with a system proxy and an empty `ProxyOverride`, requests to `127.0.0.1:<bridge>` went
+through the local proxy, which answers 502 for a loopback upstream that is not listening
+yet.
+
+**Fix** — the bridge client uses `SocketsHttpHandler { UseProxy = false }`, and 502/503/504
+are treated as transient (retried) instead of fatal.
+
+### 6.7 "Runtime exited" after a normal restart
+
+**Symptom** — the status flashes `Runtime exited` when switching model or workspace.
+
+**Cause** — `ShutdownAsync` stops the process on purpose, but the `Exited` handler set the
+status unconditionally.
+
+**Fix** — `_expectedExit` marks planned shutdowns; only unexpected exits report
+`Runtime exited`.
+
+### 6.8 Workspace encoding
+
+`RDshCore` is a submodule; never commit changes inside it. The CI mutates only the copy in
+`dist\_kernel-stage`.
+
+---
+
+## 7. Maintenance
+
+### 7.1 Version bumps
+
+See [§2.5](#25-change-the-version). The artifact name follows the version.
+
+### 7.2 Rebuild the native components
+
+```powershell
+.\build-release.ps1              # Release, MinGW
+.\build-release.ps1 -Force       # ignore the CMake cache
+git add natives\win-x64
+git commit -m "natives: rebuild"
+```
+
+Sanity check before committing:
+
+```powershell
+.\natives\win-x64\RvmEngine.exe --probe-availability
+# backend=sandbox / appcontainer=ok / winfsp=ok / rvm_available=true
+```
+
+### 7.3 Updating the kernel submodule
 
 ```powershell
 cd RDshCore
-pnpm install --frozen-lockfile
-pnpm run build
-node apps/cli/lib/bin.js --help     # 这一步过了，说明内核本身没问题
+git fetch && git checkout <new-commit>
+cd ..
+git add RDshCore
 ```
 
-剩下的「怎么装成不含链接的发行树」交给 CI 里那两个脚本，不要在本地重现。
+Then run a CI build. If the kernel changes its package layout, the assertions in
+`Build-ReleasePackage.ps1` are the first thing to update.
 
----
+### 7.4 Where the numbers live
 
-## 八、磁盘基线（供比对）
-
-| 时间点 | D 盘可用 |
-| --- | --- |
-| 灾难前 | ~100 GB |
-| 膨胀峰值 | ~84 GB |
-| 清理后 | 130.3 GB |
-
-以后每次构建前后各记一次，差值超过 2GB 就说明哪里不对。
+The sizes and timings in [§1](#1-what-gets-built) come from the run of 2026-11-23
+(`0.0.1-beta.2`). Update them when they drift; they are the fastest way to notice that
+the packaging set changed.
