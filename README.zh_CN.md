@@ -3,6 +3,8 @@
 
 试着对模型的每一响应负责。
 
+严格的 Agent 文件隔离 Harness
+
 <p>
   <a href="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml"><img alt="build-release" src="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/f13T2ach/Responsible/commits/main"><img alt="last commit" src="https://img.shields.io/github/last-commit/f13T2ach/Responsible?branch=main"></a>
@@ -20,7 +22,7 @@
 
 Responsible 的内核是 Deepseek Harness，通过载入自定插件来重新路由 AI 的指令请求到 Responsible Virtual Machine（RVM），同时支持基于 AppContainer 的工具链穿透、独立工作区来提供安全的 Agent 辅助编程环境，期望任何人和 AI 都无法突破 Responsible 进行隐私读取和中间人攻击。
 
-Responsible 支持安装专为 Responsible 定制的 DSH 插件（RDsh）来定义含本地配置文件的敏感工具的调用方式（如 Git、SSH）。
+~~Responsible 支持安装专为 Responsible 定制的 DSH 插件（RDsh）来定义含本地配置文件的敏感工具的调用方式（如 Git、SSH）。~~
 
 ## 架构
 
@@ -71,7 +73,7 @@ cd Responsible; dotnet build                  # 或 dotnet publish -c Release
 
 启动后 `Responsible.exe` 会按需拉起 `RDshCore` 与 `RvmEngine`；`RTray.exe` 由宿主启动并监视宿主进程句柄，宿主被强杀时由它清掉 `subst` 盘符与遗留子进程。
 
-发行打包、随之而来的磁盘陷阱与现行构建流程，见 [BUILD-GUIDE.md](BUILD-GUIDE.md)。
+发行打包、随之而来的磁盘陷阱与现行构建流程，见 [BUILD-GUIDE.zh_CN.md](BUILD-GUIDE.zh_CN.md)（英文版为 [BUILD-GUIDE.md](BUILD-GUIDE.md)）。
 
 ## RDsh 插件
 

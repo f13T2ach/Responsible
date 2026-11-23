@@ -3,6 +3,8 @@
 
 Taking responsibility for every model response.
 
+A strict file-isolation harness for agents
+
 <p>
   <a href="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml"><img alt="build-release" src="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/f13T2ach/Responsible/commits/main"><img alt="last commit" src="https://img.shields.io/github/last-commit/f13T2ach/Responsible?branch=main"></a>
@@ -20,7 +22,7 @@ Taking responsibility for every model response.
 
 Responsible's core is DeepSeek Harness. It loads custom plugins to reroute the AI's instruction requests into the Responsible Virtual Machine (RVM), and pairs AppContainer-based toolchain penetration with independent workspaces to provide a safe agent-assisted coding environment. The aim is that neither a person nor an AI can break out of Responsible to read private data or mount a man-in-the-middle attack.
 
-Responsible can install DSH plugins built specifically for it (RDsh) to define how sensitive tools that carry local configuration — Git, SSH, and the like — are invoked.
+~~Responsible can install DSH plugins built specifically for it (RDsh) to define how sensitive tools that carry local configuration — Git, SSH, and the like — are invoked.~~
 
 ## Architecture
 
