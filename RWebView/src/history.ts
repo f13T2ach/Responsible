@@ -1,4 +1,7 @@
 ﻿import type { WireChanges, WireMessage, WirePart, WireTool, WireUsage } from "./bridge";
+import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { ChangedFilesCard } from "./chat/ChangedFilesCard";
 import { renderMarkdown, type CodeBlock } from "./markdown";
 import { getLocale, t } from "./i18n";
 import { TurnRail, type TurnSource } from "./turn-rail";
@@ -870,50 +873,25 @@ export class HistoryView {
 
   appendChanges(changes: WireChanges): void {
     if (changes.total <= 0) return;
+    const index = this.changeList.length;
     this.changeList.push(changes);
-    const card = document.createElement("div");
-    card.className = "msg-changes open";
-    card.dataset.turn = String(changes.turn);
-    const head = document.createElement("button");
-    head.type = "button";
-    head.className = "changes-head";
-    head.innerHTML =
-      `<span class="changes-chev">${icons.chevron}</span>` +
-      `<span class="changes-ico">${icons.file}</span>` +
-      `<span class="changes-title"></span>` +
-      `<span class="changes-stat"><span class="change-add"></span><span class="change-del"></span></span>`;
-    head.querySelector(".changes-title")!.textContent = t("changes.edited", changes.total);
-    head.querySelector(".change-add")!.textContent = `+${changes.added}`;
-    head.querySelector(".change-del")!.textContent = `-${changes.deleted}`;
-
-    const list = document.createElement("div");
-    list.className = "changes-list";
-    const files = changes.files.slice(0, 50);
-    const cwd = changes.cwd.replace(/[\\/]+$/, "");
-    for (const f of files) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "change-file";
-      row.dataset.path = /^[A-Za-z]:[\\/]|^\\\\|^\//.test(f.path) ? f.path : `${cwd}/${f.path}`;
-      row.title = row.dataset.path;
-      row.innerHTML =
-        `${icons.file}<span class="change-name"></span>` +
-        (f.binary || f.oversized
-          ? `<span class="change-size">${f.binary ? t("changes.binary") : t("changes.oversized")}</span>`
-          : `<span class="change-add">+${f.added}</span><span class="change-del">-${f.deleted}</span>`);
-      row.querySelector(".change-name")!.textContent = f.display;
-      list.append(row);
+    const host = document.createElement("div");
+    host.className = "msg-changes";
+    host.dataset.turn = String(changes.turn);
+    // 卡片用 React 渲染（迁移自 DSH 的结构）；点卡片或某一行都直接开右侧栏
+    try {
+      createRoot(host).render(
+        createElement(ChangedFilesCard, {
+          changes,
+          onOpen: (offset: number) => this.onShowDiff(changes, "", index + offset),
+        }),
+      );
+    } catch (error) {
+      host.textContent = "card error: " + String(error);
     }
-    if (changes.total > files.length) {
-      const more = document.createElement("div");
-      more.className = "changes-more";
-      more.textContent = t("changes.more", changes.total - files.length);
-      list.append(more);
-    }
-    card.append(head, list);
-    this.changeNodes.push(card);
-    this.thread.append(card);
-    card.animate(
+    this.changeNodes.push(host);
+    this.thread.append(host);
+    host.animate(
       [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }],
       { duration: 180, easing: "cubic-bezier(.2,.7,.3,1)" },
     );
