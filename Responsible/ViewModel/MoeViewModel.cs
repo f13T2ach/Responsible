@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -10,6 +10,8 @@ using Responsible.Localization;
 using Responsible.Messages;
 using Responsible.MoeViews.Plugins;
 using Responsible.Services;
+using Responsible.Services.Dsh;
+using Responsible.Infrastructure;
 using Responsible.View;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
@@ -91,7 +93,8 @@ public partial class MoeViewModel : ObservableObject
         IWorkspaceEditorService workspaceEditor,
         IContentDialogService dialogs,
         IAclAuthorizationService acl,
-        IWorkspacePreparation preparation)
+        IWorkspacePreparation preparation,
+        ApprovalBridge approvals)
     {
         _messenger = messenger;
         _workspaceStore = workspaceStore;
@@ -99,6 +102,14 @@ public partial class MoeViewModel : ObservableObject
         _dialogs = dialogs;
         _acl = acl;
         _preparation = preparation;
+        // 审批问询：RVM 会话直接拒绝，其余交给对话区底部的卡片
+        _approvals = approvals;
+        _approvals.IsRvmSession = _ => Session.IsRvmProtected && Session.HasActiveRvmSession;
+        _approvals.IsCurrentSession = id => string.Equals(id, Session.CurrentSessionId, StringComparison.Ordinal);
+        _approvals.PendingChanged += OnApprovalsChanged;
+        _approvals.Start();
+        messenger.Register<MoeViewModel, ApprovalAnsweredMessage>(
+            this, static (recipient, message) => recipient.OnApprovalAnswered(message.Value.Id, message.Value.Outcome));
         Session = session;
         ModelOptions = catalog.ModelOptions;
         _selectedModelOption = ModelOptions.FirstOrDefault(o => o.IsSelected) ?? ModelOptions.FirstOrDefault();
@@ -136,6 +147,9 @@ public partial class MoeViewModel : ObservableObject
         RefreshPermissionUi();
         _ = session.InitializeAsync();
     }
+
+    private readonly ApprovalBridge _approvals;
+    private readonly IMessenger _messengerForApprovals;
 
     public IChatSessionService Session { get; }
 
@@ -498,6 +512,23 @@ public partial class MoeViewModel : ObservableObject
     });
 
     private void OnSessionLoadingChanged(bool loading) => Ui(() => IsSessionLoading = loading);
+
+    private void OnApprovalsChanged(IReadOnlyList<DshApprovalRow> rows) => Ui(() =>
+    {
+        var wire = rows.Select(row => new WireApproval(
+            row.Id,
+            row.ToolName,
+            row.Reason,
+            row.CallId,
+            row.Dangerous ? true : null)).ToArray();
+        _messenger.Send(new ApprovalPendingMessage(wire));
+    });
+
+    private void OnApprovalAnswered(string id, string outcome)
+    {
+        if (outcome is not ("allowed-once" or "rejected" or "cancelled")) return;
+        _ = _approvals.AnswerAsync(id, outcome);
+    }
 
     public string WorkspaceBadge => Session.WorkspaceBadge;
 

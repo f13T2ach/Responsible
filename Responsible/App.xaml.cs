@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -10,6 +10,8 @@ using Responsible.Messages;
 using Responsible.MoeViews;
 using Responsible.MoeViews.Plugins;
 using Responsible.Services;
+using Responsible.Services.Dsh;
+using Responsible.Infrastructure;
 using Responsible.View;
 using Responsible.ViewModel;
 using System.IO;
@@ -152,6 +154,7 @@ namespace Responsible
             services.AddSingleton<INavigationService, NavigationService>();
             services.AddSingleton<IModelCatalogService, ModelCatalogService>();
             services.AddSingleton<IWorkspaceChangeTracker, WorkspaceChangeTracker>();
+        services.AddSingleton<ApprovalBridge>();
             services.AddSingleton<PluginOverridesStore>();
             services.AddSingleton<IWorkspaceStore, WorkspaceStore>();
             services.AddSingleton<IChatSessionService, ChatSessionService>();

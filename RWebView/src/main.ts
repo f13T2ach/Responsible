@@ -1,7 +1,8 @@
-﻿import { applyPalette, connect, defaultPalette, onMessage, send, type HostMessage, type WireStats } from "./bridge";
+import { applyPalette, connect, defaultPalette, onMessage, send, type HostMessage, type WireStats } from "./bridge";
 import { HistoryView, icons } from "./history";
 
 import { StatsView } from "./stats";
+import { ApprovalDock } from "./approval";
 import { installPreview } from "./preview";
 import { setLocale, t } from "./i18n";
 
@@ -9,6 +10,8 @@ const app = document.getElementById("app")!;
 
 const stats = new StatsView(app);
 const history = new HistoryView(app);
+// 审批卡片悬浮在对话区底部；RVM 会话的请求在宿主侧就被拒绝，不会走到这里
+const approvalDock = new ApprovalDock(document.body);
 // 改动 diff 由宿主右侧独立的 WebView 渲染：这里只把意图发出去
 history.onToggleDiff = (changes) => send({ type: "showDiff", turn: changes.turn });
 history.onShowDiff = (changes, path, index) => send({ type: "showDiff", turn: changes.turn, path, index });
@@ -153,6 +156,9 @@ onMessage((msg: HostMessage) => {
     case "message.done":
       history.done(msg.id, msg.state);
       refreshStreaming();
+      break;
+    case "approval.request":
+      approvalDock.update(msg.approvals ?? []);
       break;
     case "changes.reset":
       history.replaceChanges(msg.changes ?? []);

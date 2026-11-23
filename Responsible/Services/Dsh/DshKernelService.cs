@@ -768,9 +768,32 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         try
         {
             while (await process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+            {
                 Debug.WriteLine($"[dsh] {line}");
+                // 插件的 stderr 是审批/沙箱链路上唯一的可观测线索，落一份文件
+                if (line.Contains("[approval]", StringComparison.Ordinal) ||
+                    line.Contains("[rvm-sandbox]", StringComparison.Ordinal))
+                    AppendKernelLog(line);
+            }
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        {
+        }
+    }
+
+    private static void AppendKernelLog(string line)
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Responsible", "logs");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "kernel.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 2 * 1024 * 1024) File.Delete(path);
+            File.AppendAllText(path, $"{DateTimeOffset.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
         }
     }

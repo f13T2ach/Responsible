@@ -58,8 +58,9 @@ public sealed partial class ChatSessionService
             ? (_rvm.Status is { Length: > 0 } status ? status : "the RVM session is not established")
             : null;
         var bindingKey = BindingKey(binding, rvmUnavailable);
-        var cwdChanged = _newConversationCwd
-                         && _activeCwd is not null
+        // 会话目录一变就必须重启内核：patch 里的 sandbox 后端是按工作区生成的，
+        // 带着 RVM 的插件跑在普通工作区上会直接拒绝执行命令。
+        var cwdChanged = _activeCwd is not null
                          && !string.Equals(cwd, _activeCwd, StringComparison.OrdinalIgnoreCase);
         if (_kernel.IsAvailable)
         {

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -8,6 +8,14 @@ namespace Responsible.Services;
 
 // DSH 进程内的 responsible-host 插件在 127.0.0.1:1107 提供只读会话/模型接口；
 // 所有请求带启动时生成的 token，端口只绑定 loopback。
+public sealed record DshApprovalRow(
+    string Id,
+    string ToolName,
+    string? CallId,
+    string? Reason,
+    string SessionId,
+    bool Dangerous);
+
 internal static class DshBridgeHttpClient
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
@@ -196,6 +204,24 @@ internal static class DshBridgeHttpClient
         return envelope.CurrentValue;
     }
 
+    public static async Task<IReadOnlyList<DshApprovalRow>> ReadApprovalsAsync(
+        DshBridgeInfo bridge, CancellationToken cancellationToken)
+    {
+        var envelope = await GetAsync<ApprovalsEnvelope>(bridge, "/approvals", cancellationToken)
+            .ConfigureAwait(false);
+        return envelope.Approvals ?? [];
+    }
+
+    // 答案只有 allowed-once / rejected / cancelled / unavailable 四个值，别的会被插件拒绝
+    public static async Task<bool> AnswerApprovalAsync(
+        DshBridgeInfo bridge, string id, string outcome, CancellationToken cancellationToken)
+    {
+        var envelope = await SendAsync<ApprovalAnswerEnvelope>(
+            bridge, HttpMethod.Post, $"/approvals/{Uri.EscapeDataString(id)}",
+            new { outcome }, cancellationToken).ConfigureAwait(false);
+        return envelope.Ok;
+    }
+
     private static Task<T> GetAsync<T>(DshBridgeInfo bridge, string path, CancellationToken cancellationToken) =>
         SendAsync<T>(bridge, HttpMethod.Get, path, null, cancellationToken);
 
@@ -258,6 +284,10 @@ internal static class DshBridgeHttpClient
     }
 
     private sealed record SessionsEnvelope(bool Ok, SessionRow[]? Sessions);
+
+    private sealed record ApprovalsEnvelope(bool Ok, DshApprovalRow[]? Approvals);
+
+    private sealed record ApprovalAnswerEnvelope(bool Ok);
     private sealed record SessionRow(
         string? SessionId, string? Title, string? Cwd, long CreatedAt, long UpdatedAt, bool Live);
 

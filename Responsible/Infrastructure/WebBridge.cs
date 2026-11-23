@@ -142,6 +142,19 @@ public sealed record HostChangesAppend(WireChanges Changes)
     public string Type => "changes.append";
 }
 
+/// <summary>一条待决定的审批（前端据此渲染卡片）。</summary>
+public sealed record WireApproval(
+    string Id,
+    string ToolName,
+    string? Reason = null,
+    string? CallId = null,
+    bool? Dangerous = null);
+
+public sealed record HostApprovalRequest(IReadOnlyList<WireApproval> Approvals)
+{
+    public string Type => "approval.request";
+}
+
 public sealed record HostChangesShow(WireChanges Changes, string? Path = null)
 {
     public string Type => "changes.show";

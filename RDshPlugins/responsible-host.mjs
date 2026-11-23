@@ -1,4 +1,4 @@
-// Responsible 预载插件：经 cordis patch 挂载进 dsh（--profile sdk --patch ...），
+﻿// Responsible 预载插件：经 cordis patch 挂载进 dsh（--profile sdk --patch ...），
 // 在不 fork 内核的前提下改写部署 persona，向宿主暴露插件清单（Windows 命名管道 NDJSON），
 // 并在 loopback 上开放会话/模型查询接口（默认 1107），供 WPF 与 RWebView 读取持久化数据。
 import { createServer } from 'node:net'
@@ -686,6 +686,67 @@ const STAT_KEYS = ['sessionStats', 'tokenUsage', 'contextPressure']
 // 当前会话的权限投影：沙箱模式 + 审批策略折叠出的 preset 当前值。
 const PERMISSION_KEYS = ['permissions']
 
+// 审批问询的中转：把 DSH 的 approval/request 挂起，等宿主通过 HTTP 回答。
+// 超时、宿主没回答、答案不在词表里，一律按 unavailable 收场（fail-closed）。
+// 迁移自 DSH 的 approval 语义：allowed-once 是一次性授权，没有“永远允许”。
+const APPROVAL_OUTCOMES = ['allowed-once', 'rejected', 'cancelled', 'unavailable']
+const APPROVAL_TIMEOUT_MS = 120_000
+
+function createApprovalBroker() {
+  const waiting = new Map()
+  let seq = 0
+  return {
+    list() {
+      return [...waiting.values()].map(item => ({ ...item.summary }))
+    },
+    answer(id, outcome) {
+      const entry = waiting.get(id)
+      if (entry === undefined || !APPROVAL_OUTCOMES.includes(outcome)) return false
+      waiting.delete(id)
+      entry.settle(outcome)
+      return true
+    },
+    ask(request) {
+      const id = `a${++seq}`
+      process.stderr.write(`[approval] ask id=${id} tool=${request.toolName} reason=${request.reason ?? ""}\n`)
+      const reason = typeof request.reason === 'string' && request.reason ? request.reason : undefined
+      const summary = {
+        id,
+        toolName: String(request.toolName ?? ''),
+        ...(request.callId === undefined ? {} : { callId: String(request.callId) }),
+        ...(reason === undefined ? {} : { reason }),
+        sessionId: String(request.agent?.session?.id ?? ''),
+        // 只有要绕开沙箱的请求才算危险，普通越界写按提示处理
+        dangerous: /danger|full-access|escalat/i.test(reason ?? ''),
+      }
+      return new Promise((resolve) => {
+        let timer
+        const finish = (outcome) => {
+          clearTimeout(timer)
+          try {
+            request.signal?.removeEventListener?.('abort', onAbort)
+          } catch {
+            // signal 不一定实现 removeEventListener
+          }
+          resolve(outcome)
+        }
+        const onAbort = () => {
+          if (waiting.delete(id)) finish('cancelled')
+        }
+        timer = setTimeout(() => {
+          if (waiting.delete(id)) finish('unavailable')
+        }, APPROVAL_TIMEOUT_MS)
+        try {
+          request.signal?.addEventListener?.('abort', onAbort, { once: true })
+        } catch {
+          // 同上：拿不到 signal 时只靠超时兜底
+        }
+        waiting.set(id, { summary, settle: finish })
+      })
+    },
+  }
+}
+
 // 与 dsh-client-ui-stats 的 totalsFromProjections 同口径，只做展示前的换算，不做任何估算
 function statsFrom(values) {
   const sessionStats = values?.sessionStats
@@ -899,7 +960,7 @@ function sendJson(response, status, body) {
 }
 
 // 端口接口只服务本机宿主：loopback 绑定 + 启动时生成的 token，避免同机其它进程冒读会话。
-function startHttpBridge(ctx, port, token) {
+function startHttpBridge(ctx, port, token, approvals) {
   const server = createHttpServer((request, response) => {
     void (async () => {
       const authorized = request.headers['x-responsible-token'] === token
@@ -938,6 +999,15 @@ function startHttpBridge(ctx, port, token) {
           for await (const chunk of request) body += chunk
           const parsed = body ? JSON.parse(body) : {}
           sendJson(response, 200, { ok: true, ...setPermission(ctx, sessionId, parsed.preset) })
+        } else if (request.method === 'GET' && url.pathname === '/approvals') {
+          sendJson(response, 200, { ok: true, approvals: approvals.list() })
+        } else if (request.method === 'POST' && /^\/approvals\/[^/]+$/.test(url.pathname)) {
+          const id = decodeURIComponent(url.pathname.split('/')[2])
+          let body = ''
+          for await (const chunk of request) body += chunk
+          const parsed = body ? JSON.parse(body) : {}
+          const accepted = approvals.answer(id, parsed.outcome)
+          sendJson(response, accepted ? 200 : 409, { ok: accepted })
         } else if (request.method === 'PUT' && url.pathname === '/credentials') {
           let body = ''
           for await (const chunk of request) body += chunk
@@ -1090,6 +1160,11 @@ export function apply(ctx, config = {}) {
     })
   }
 
-  if (Number.isInteger(config.bridgePort) && config.bridgePort > 0 && config.bridgePort < 65536 && token)
-    startHttpBridge(ctx, config.bridgePort, token)
+  if (Number.isInteger(config.bridgePort) && config.bridgePort > 0 && config.bridgePort < 65536 && token) {
+    const approvals = createApprovalBroker()
+    // 有宿主可问时才接管；否则交回 DSH 自己的答案链（仍然 fail-closed）
+    process.stderr.write("[approval] answerer registered\n")
+    ctx.on('approval/request', (request, next) => approvals.ask(request), { global: true })
+    startHttpBridge(ctx, config.bridgePort, token, approvals)
+  }
 }

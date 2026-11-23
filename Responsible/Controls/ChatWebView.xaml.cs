@@ -45,6 +45,8 @@ public partial class ChatWebView : UserControl
             this, static (r, m) => ((ChatWebView)r).OnDialogOpenChanged(m.Value));
         WeakReferenceMessenger.Default.Register<LanguageChangedMessage>(
             this, static (r, _) => ((ChatWebView)r).OnLanguageChanged());
+        WeakReferenceMessenger.Default.Register<ApprovalPendingMessage>(
+            this, static (r, m) => ((ChatWebView)r).OnApprovalPending(m.Value));
     }
 
     /// <summary>前端点了改动卡片或其中某个文件。</summary>
@@ -156,6 +158,10 @@ public partial class ChatWebView : UserControl
             case "openLink":
                 OpenExternal(msg.Href);
                 break;
+            case "approval.answer":
+                if (msg.Id is { Length: > 0 } approvalId && msg.Text is { Length: > 0 } outcome)
+                    WeakReferenceMessenger.Default.Send(new ApprovalAnsweredMessage(approvalId, outcome));
+                break;
             case "showDiff":
                 // 对话区把“看这个文件的 diff”交给宿主：右侧是独立 WebView，不是覆盖层
                 DiffRequested?.Invoke(this, new DiffRequest(msg.Turn ?? 0, msg.Path, msg.Index));
@@ -209,6 +215,9 @@ public partial class ChatWebView : UserControl
     }
 
     private void OnLanguageChanged() => Ui(() => Post(new HostLocale(Loc.Language)));
+
+    private void OnApprovalPending(IReadOnlyList<WireApproval> approvals) =>
+        Ui(() => Post(new HostApprovalRequest(approvals)));
 
     private void OnThemeChanged(ApplicationTheme theme, System.Windows.Media.Color accent)
     {
