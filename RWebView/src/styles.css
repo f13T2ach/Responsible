@@ -93,10 +93,13 @@ html, body {
 
 /* ── summary 调用统计条 ─────────────────────────────── */
 .stats-bar {
+  position: relative;
   flex: none;
   display: flex;
   align-items: center;
   gap: 18px;
+  min-width: 0;
+  overflow: hidden;
   padding: 10px 22px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 55%, var(--bg));
@@ -1375,6 +1378,7 @@ html, body {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1684,6 +1688,7 @@ html, body {
 
 /* “空闲”左侧给侧栏开关留位，避免两者叠在一起 */
 .stats-live { margin-right: 34px; }
+.stats-tasks.empty { display: none; }
 
 /* ---- 顶栏运行任务指示器 ---- */
 .stats-tasks {
@@ -1738,3 +1743,135 @@ html, body {
 }
 
 .stats-bar { position: relative; }
+
+/* ---- 提问卡片：接管条样式迁移自 DSH 的 QuestionComposer ---- */
+.q-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 20px 12px;
+  z-index: 32;
+  pointer-events: none;
+}
+
+.q-card {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 880px;
+  max-height: min(60vh, 520px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+}
+
+.q-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 16px 6px;
+}
+
+.q-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--text); }
+.q-countdown { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.q-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 16px 10px;
+  overflow-y: auto;
+}
+
+.q-block { display: flex; flex-direction: column; gap: 6px; }
+.q-block-header { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); }
+.q-question { font-size: 13px; line-height: 20px; color: var(--text); }
+.q-detail { font-size: 12px; line-height: 19px; color: var(--text-2); white-space: pre-wrap; }
+
+.q-options { display: flex; flex-direction: column; gap: 4px; }
+
+.q-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.q-option:hover { background: var(--surface-2); color: var(--text); }
+.q-option.active { border-color: var(--accent); color: var(--text); background: var(--surface-2); }
+
+.q-mark {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--text-3);
+  border-radius: 50%;
+  position: relative;
+}
+
+.q-mark.check { border-radius: 3px; }
+.q-option.active .q-mark { border-color: var(--accent); }
+.q-option.active .q-mark::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.q-option-label { flex: none; }
+.q-option-desc { flex: 1; color: var(--text-3); font-size: 11.5px; }
+
+.q-custom {
+  margin-top: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.q-custom:focus { outline: none; border-color: var(--accent); }
+
+.q-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.q-button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.q-button.ghost:hover { background: var(--surface-2); }
+.q-button.primary { border-color: transparent; background: var(--accent); color: #10202b; font-weight: 600; }
+.q-button.primary:hover { filter: brightness(1.08); }
+.q-button.disabled { opacity: .5; cursor: default; filter: none; }

@@ -1,4 +1,4 @@
-﻿// Responsible 预载插件：经 cordis patch 挂载进 dsh（--profile sdk --patch ...），
+// Responsible 预载插件：经 cordis patch 挂载进 dsh（--profile sdk --patch ...），
 // 在不 fork 内核的前提下改写部署 persona，向宿主暴露插件清单（Windows 命名管道 NDJSON），
 // 并在 loopback 上开放会话/模型查询接口（默认 1107），供 WPF 与 RWebView 读取持久化数据。
 import { createServer } from 'node:net'
@@ -992,7 +992,80 @@ async function listWorkspaceFiles(ctx, sessionId) {
   entries.sort((left, right) => Number(right.dir) - Number(left.dir) || left.name.localeCompare(right.name))
   return { cwd, entries }
 }
-function startHttpBridge(ctx, port, token, approvals) {
+
+// 提问问询的中转：模型用 ask_user_question 提问时挂起，等宿主把答案带回来。
+// 答案结构必须与 DSH 一致（每个问题一条，selected 是选项 label 数组）。
+const QUESTION_LIMIT_MS = 300_000
+
+function createQuestionBroker() {
+  const waiting = new Map()
+  let seq = 0
+  return {
+    list() {
+      return [...waiting.values()].map(item => ({ ...item.summary }))
+    },
+    answer(id, answers) {
+      const entry = waiting.get(id)
+      if (entry === undefined) return false
+      if (!Array.isArray(answers)) return false
+      waiting.delete(id)
+      entry.settle({ answers })
+      return true
+    },
+    ask(request) {
+      const id = `q${++seq}`
+      const questions = (request.questions ?? []).map(question => ({
+        id: String(question.id),
+        question: String(question.question ?? ''),
+        ...(question.detail === undefined ? {} : { detail: String(question.detail) }),
+        ...(question.header === undefined ? {} : { header: String(question.header) }),
+        ...(question.multiSelect === true ? { multiSelect: true } : {}),
+        options: (question.options ?? []).map(option => ({
+          label: String(option.label),
+          ...(option.description === undefined ? {} : { description: String(option.description) }),
+        })),
+      }))
+      const summary = {
+        id,
+        sessionId: String(request.agent?.session?.id ?? ''),
+        questions,
+        // 模型自己的等待窗口：界面用它显示倒计时
+        ...(typeof request.wait === 'number' ? { waitMs: request.wait } : {}),
+      }
+      return new Promise((resolve, reject) => {
+        let timer
+        const finish = answer => {
+          clearTimeout(timer)
+          try {
+            request.signal?.removeEventListener?.('abort', onAbort)
+          } catch {
+            // signal 不一定实现 removeEventListener
+          }
+          resolve(answer)
+        }
+        const fail = reason => {
+          clearTimeout(timer)
+          reject(new Error(reason))
+        }
+        const onAbort = () => {
+          if (waiting.delete(id)) fail('question cancelled')
+        }
+        // 模型的 wait 比我们自己的上限更短时以它为准
+        const limit = typeof request.wait === 'number' ? Math.min(request.wait, QUESTION_LIMIT_MS) : QUESTION_LIMIT_MS
+        timer = setTimeout(() => {
+          if (waiting.delete(id)) fail('question timed out')
+        }, limit)
+        try {
+          request.signal?.addEventListener?.('abort', onAbort, { once: true })
+        } catch {
+          // 拿不到 signal 时只靠超时兜底
+        }
+        waiting.set(id, { summary, settle: finish })
+      })
+    },
+  }
+}
+function startHttpBridge(ctx, port, token, approvals, questions) {
   const server = createHttpServer((request, response) => {
     void (async () => {
       const authorized = request.headers['x-responsible-token'] === token
@@ -1031,6 +1104,15 @@ function startHttpBridge(ctx, port, token, approvals) {
           for await (const chunk of request) body += chunk
           const parsed = body ? JSON.parse(body) : {}
           sendJson(response, 200, { ok: true, ...setPermission(ctx, sessionId, parsed.preset) })
+        } else if (request.method === 'GET' && url.pathname === '/questions') {
+          sendJson(response, 200, { ok: true, questions: questions.list() })
+        } else if (request.method === 'POST' && /^\/questions\/[^/]+$/.test(url.pathname)) {
+          const id = decodeURIComponent(url.pathname.split('/')[2])
+          let body = ''
+          for await (const chunk of request) body += chunk
+          const parsed = body ? JSON.parse(body) : {}
+          const accepted = questions.answer(id, parsed.answers)
+          sendJson(response, accepted ? 200 : 409, { ok: accepted })
         } else if (request.method === 'GET' && /^\/files\/[^/]+$/.test(url.pathname)) {
           const sessionId = decodeURIComponent(url.pathname.split('/')[2])
           sendJson(response, 200, { ok: true, ...(await listWorkspaceFiles(ctx, sessionId)) })
@@ -1197,9 +1279,15 @@ export function apply(ctx, config = {}) {
 
   if (Number.isInteger(config.bridgePort) && config.bridgePort > 0 && config.bridgePort < 65536 && token) {
     const approvals = createApprovalBroker()
+    const questions = createQuestionBroker()
     // 有宿主可问时才接管；否则交回 DSH 自己的答案链（仍然 fail-closed）
     process.stderr.write("[approval] answerer registered\n")
     ctx.on('approval/request', (request, next) => approvals.ask(request), { global: true })
-    startHttpBridge(ctx, config.bridgePort, token, approvals)
+    ctx.on('user-questions/request', (request, next) => {
+      if (!Array.isArray(request.questions) || request.questions.length === 0) return next()
+      process.stderr.write(`[questions] ask count=${request.questions.length}\n`)
+      return questions.ask(request)
+    }, { global: true })
+    startHttpBridge(ctx, config.bridgePort, token, approvals, questions)
   }
 }

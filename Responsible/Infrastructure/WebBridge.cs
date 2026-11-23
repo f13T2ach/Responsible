@@ -154,6 +154,26 @@ public sealed record WireFileEntry(string Name, bool? Dir = null, long? Size = n
 
 public sealed record WireTask(string CallId, string Name, string Summary);
 
+public sealed record WireQuestionOption(string Label, string? Description = null);
+
+public sealed record WireQuestion(
+    string Id,
+    string Question,
+    string? Detail = null,
+    string? Header = null,
+    bool? MultiSelect = null,
+    IReadOnlyList<WireQuestionOption>? Options = null);
+
+public sealed record WireQuestionBatch(string Id, IReadOnlyList<WireQuestion> Questions, long? WaitMs = null);
+
+public sealed record HostQuestions(IReadOnlyList<WireQuestionBatch> Batches)
+{
+    public string Type => "questions.request";
+}
+
+/// <summary>前端提交的一份答案：每个问题一条，selected 是选项 label。</summary>
+public sealed record WireQuestionAnswer(string Id, string[] Selected, string? Custom = null);
+
 public sealed record HostTasks(IReadOnlyList<WireTask> Tasks)
 {
     public string Type => "tasks.running";
@@ -211,7 +231,7 @@ public sealed record DiffRequest(int Turn, string? Path, int? Index = null);
 
 public sealed record WebMessage(string Type, int? Protocol = null, string? Text = null, string? Id = null,
     string? Href = null, int? Turn = null, string? Path = null, int? Index = null,
-    string? Message = null);
+    string? Message = null, WireQuestionAnswer[]? Answers = null);
 
 public static class WebBridge
 {

@@ -43,7 +43,9 @@ export class StatsView {
   /** 顶栏的运行任务指示器：空闲显示“没有正在运行的任务”，有任务时点开列出详情。 */
   setTasks(tasks: WireTask[]): void {
     this.tasksList = tasks;
-    this.tasksLabel.textContent = tasks.length === 0 ? t("tasks.none") : t("tasks.running", tasks.length);
+    // 没有任务时整块隐藏，别占着顶栏
+    this.tasks.classList.toggle("empty", tasks.length === 0);
+    this.tasksLabel.textContent = tasks.length === 0 ? "" : t("tasks.running", tasks.length);
     this.tasks.classList.toggle("active", tasks.length > 0);
     this.tasks.classList.toggle("open", tasks.length > 0 && this.tasks.classList.contains("open"));
     if (tasks.length === 0) this.closeTasks();

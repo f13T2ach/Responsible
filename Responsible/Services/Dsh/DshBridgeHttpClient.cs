@@ -8,6 +8,22 @@ namespace Responsible.Services;
 
 // DSH 进程内的 responsible-host 插件在 127.0.0.1:1107 提供只读会话/模型接口；
 // 所有请求带启动时生成的 token，端口只绑定 loopback。
+public sealed record DshQuestionOption(string Label, string? Description);
+
+public sealed record DshQuestionItem(
+    string Id,
+    string Question,
+    string? Detail,
+    string? Header,
+    bool MultiSelect,
+    IReadOnlyList<DshQuestionOption> Options);
+
+public sealed record DshQuestionRow(
+    string Id,
+    string SessionId,
+    IReadOnlyList<DshQuestionItem> Questions,
+    long? WaitMs);
+
 public sealed record DshWorkspaceFile(string Name, bool Dir, long Size);
 
 public sealed record DshApprovalRow(
@@ -206,6 +222,23 @@ internal static class DshBridgeHttpClient
         return envelope.CurrentValue;
     }
 
+    public static async Task<IReadOnlyList<DshQuestionRow>> ReadQuestionsAsync(
+        DshBridgeInfo bridge, CancellationToken cancellationToken)
+    {
+        var envelope = await GetAsync<QuestionsEnvelope>(bridge, "/questions", cancellationToken)
+            .ConfigureAwait(false);
+        return envelope.Questions ?? [];
+    }
+
+    public static async Task<bool> AnswerQuestionAsync(
+        DshBridgeInfo bridge, string id, object answers, CancellationToken cancellationToken)
+    {
+        var envelope = await SendAsync<ApprovalAnswerEnvelope>(
+            bridge, HttpMethod.Post, $"/questions/{Uri.EscapeDataString(id)}",
+            new { answers }, cancellationToken).ConfigureAwait(false);
+        return envelope.Ok;
+    }
+
     public static async Task<IReadOnlyList<DshWorkspaceFile>> ReadFilesAsync(
         DshBridgeInfo bridge, string sessionId, CancellationToken cancellationToken)
     {
@@ -298,6 +331,8 @@ internal static class DshBridgeHttpClient
     private sealed record ApprovalsEnvelope(bool Ok, DshApprovalRow[]? Approvals);
 
     private sealed record FilesEnvelope(bool Ok, string? Cwd, DshWorkspaceFile[]? Entries);
+
+    private sealed record QuestionsEnvelope(bool Ok, DshQuestionRow[]? Questions);
 
     private sealed record ApprovalAnswerEnvelope(bool Ok);
     private sealed record SessionRow(

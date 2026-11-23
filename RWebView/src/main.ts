@@ -3,6 +3,7 @@ import { HistoryView, icons } from "./history";
 
 import { StatsView } from "./stats";
 import { ApprovalDock } from "./approval";
+import { QuestionsDock } from "./questions";
 import { mountSidebar, mountSidebarToggle } from "./sidebar/Sidebar";
 import { sidebarStore } from "./sidebar/store";
 
@@ -24,6 +25,7 @@ stats.bindTasksToggle();
 const history = new HistoryView(chatColumn);
 // 审批卡片悬浮在对话区底部；RVM 会话的请求在宿主侧就被拒绝，不会走到这里
 const approvalDock = new ApprovalDock(document.body);
+const questionsDock = new QuestionsDock(document.body);
 mountSidebarToggle(chatColumn);
 try {
   mountSidebar(sidebarHost);
@@ -186,6 +188,9 @@ onMessage((msg: HostMessage) => {
     case "message.done":
       history.done(msg.id, msg.state);
       refreshStreaming();
+      break;
+    case "questions.request":
+      questionsDock.update(msg.batches ?? []);
       break;
     case "tasks.running":
       stats.setTasks(msg.tasks ?? []);

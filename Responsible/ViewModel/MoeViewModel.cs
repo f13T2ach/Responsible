@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -94,7 +94,8 @@ public partial class MoeViewModel : ObservableObject
         IContentDialogService dialogs,
         IAclAuthorizationService acl,
         IWorkspacePreparation preparation,
-        ApprovalBridge approvals)
+        ApprovalBridge approvals,
+        QuestionBridge questions)
     {
         _messenger = messenger;
         _workspaceStore = workspaceStore;
@@ -108,8 +109,15 @@ public partial class MoeViewModel : ObservableObject
         _approvals.IsCurrentSession = id => string.Equals(id, Session.CurrentSessionId, StringComparison.Ordinal);
         _approvals.PendingChanged += OnApprovalsChanged;
         _approvals.Start();
+        // 提问：RVM 会话也要显示（提问不涉及权限）
+        _questions = questions;
+        _questions.IsCurrentSession = id => string.Equals(id, Session.CurrentSessionId, StringComparison.Ordinal);
+        _questions.PendingChanged += OnQuestionsChanged;
+        _questions.Start();
         messenger.Register<MoeViewModel, ApprovalAnsweredMessage>(
             this, static (recipient, message) => recipient.OnApprovalAnswered(message.Value.Id, message.Value.Outcome));
+        messenger.Register<MoeViewModel, QuestionAnsweredMessage>(
+            this, static (recipient, message) => recipient.OnQuestionAnswered(message.Value.Id, message.Value.Answers));
         Session = session;
         ModelOptions = catalog.ModelOptions;
         _selectedModelOption = ModelOptions.FirstOrDefault(o => o.IsSelected) ?? ModelOptions.FirstOrDefault();
@@ -149,6 +157,7 @@ public partial class MoeViewModel : ObservableObject
     }
 
     private readonly ApprovalBridge _approvals;
+    private readonly QuestionBridge _questions;
     private readonly IMessenger _messengerForApprovals;
 
     public IChatSessionService Session { get; }
@@ -526,6 +535,38 @@ public partial class MoeViewModel : ObservableObject
             row.Dangerous ? true : null)).ToArray();
         _messenger.Send(new ApprovalPendingMessage(wire));
     });
+
+    private void OnQuestionsChanged(IReadOnlyList<DshQuestionRow> rows) => Ui(() =>
+    {
+        var batches = rows.Select(row => new WireQuestionBatch(
+            row.Id,
+            row.Questions.Select(question => new WireQuestion(
+                question.Id,
+                question.Question,
+                question.Detail,
+                question.Header,
+                question.MultiSelect ? true : null,
+                question.Options.Count == 0
+                    ? null
+                    : question.Options.Select(option => new WireQuestionOption(option.Label, option.Description)).ToArray()))
+                .ToArray(),
+            row.WaitMs)).ToArray();
+        _messenger.Send(new QuestionPendingMessage(batches));
+    });
+
+    private void OnQuestionAnswered(string id, IReadOnlyList<WireQuestionAnswer> answers)
+    {
+        var payload = new
+        {
+            answers = answers.Select(answer => new
+            {
+                id = answer.Id,
+                selected = answer.Selected,
+                custom = answer.Custom,
+            }).ToArray(),
+        };
+        _ = _questions.AnswerAsync(id, payload);
+    }
 
     private void OnApprovalAnswered(string id, string outcome)
     {

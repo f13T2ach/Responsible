@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -772,6 +772,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
                 Debug.WriteLine($"[dsh] {line}");
                 // 插件的 stderr 是审批/沙箱链路上唯一的可观测线索，落一份文件
                 if (line.Contains("[approval]", StringComparison.Ordinal) ||
+                    line.Contains("[questions]", StringComparison.Ordinal) ||
                     line.Contains("[rvm-sandbox]", StringComparison.Ordinal))
                     AppendKernelLog(line);
             }

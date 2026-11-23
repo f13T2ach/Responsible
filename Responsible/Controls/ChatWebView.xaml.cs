@@ -49,6 +49,8 @@ public partial class ChatWebView : UserControl
             this, static (r, _) => ((ChatWebView)r).OnLanguageChanged());
         WeakReferenceMessenger.Default.Register<ApprovalPendingMessage>(
             this, static (r, m) => ((ChatWebView)r).OnApprovalPending(m.Value));
+        WeakReferenceMessenger.Default.Register<QuestionPendingMessage>(
+            this, static (r, m) => ((ChatWebView)r).OnQuestionPending(m.Value));
     }
 
     /// <summary>前端点了改动卡片或其中某个文件。</summary>
@@ -169,6 +171,10 @@ public partial class ChatWebView : UserControl
             case "files.request":
                 _ = PushFilesAsync();
                 break;
+            case "questions.answer":
+                if (msg.Id is { Length: > 0 } questionId && msg.Answers is { Length: > 0 } answers)
+                    WeakReferenceMessenger.Default.Send(new QuestionAnsweredMessage(questionId, answers));
+                break;
             case "approval.answer":
                 if (msg.Id is { Length: > 0 } approvalId && msg.Text is { Length: > 0 } outcome)
                     WeakReferenceMessenger.Default.Send(new ApprovalAnsweredMessage(approvalId, outcome));
@@ -245,6 +251,9 @@ public partial class ChatWebView : UserControl
         {
         }
     }
+
+    private void OnQuestionPending(IReadOnlyList<WireQuestionBatch> batches) =>
+        Ui(() => Post(new HostQuestions(batches)));
 
     private void OnRunningTools(IReadOnlyList<RunningTool> tools) => Ui(() =>
         Post(new HostTasks(tools.Select(tool => new WireTask(tool.CallId, tool.Name, tool.Summary)).ToArray())));

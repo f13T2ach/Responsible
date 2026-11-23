@@ -76,6 +76,32 @@ export interface WireChangedFile {
   oversized?: boolean;
 }
 
+export interface WireQuestionOption {
+  label: string;
+  description?: string | null;
+}
+
+export interface WireQuestion {
+  id: string;
+  question: string;
+  detail?: string | null;
+  header?: string | null;
+  multiSelect?: boolean | null;
+  options?: WireQuestionOption[] | null;
+}
+
+export interface WireQuestionBatch {
+  id: string;
+  questions: WireQuestion[];
+  waitMs?: number | null;
+}
+
+export interface WireQuestionAnswer {
+  id: string;
+  selected: string[];
+  custom?: string;
+}
+
 export interface WireTask {
   callId: string;
   name: string;
@@ -133,6 +159,7 @@ export type HostMessage =
   | { type: "approval.request"; approvals: WireApproval[] }
   | { type: "workspace.files"; entries: WireFileEntry[] }
   | { type: "tasks.running"; tasks: WireTask[] }
+  | { type: "questions.request"; batches: WireQuestionBatch[] }
   | { type: "changes.reset"; changes?: WireChanges[] }
   | { type: "stats"; stats: WireStats }
   | { type: "toast"; text: string }
@@ -147,6 +174,7 @@ export type WebMessage =
   | { type: "showDiff"; turn: number; path?: string; index?: number }
   | { type: "approval.answer"; id: string; text: "allowed-once" | "rejected" }
   | { type: "files.request" }
+  | { type: "questions.answer"; id: string; answers: WireQuestionAnswer[] }
   | { type: "clientError"; message: string };
 
 export const defaultPalette: Palette = {

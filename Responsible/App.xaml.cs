@@ -155,6 +155,7 @@ namespace Responsible
             services.AddSingleton<IModelCatalogService, ModelCatalogService>();
             services.AddSingleton<IWorkspaceChangeTracker, WorkspaceChangeTracker>();
         services.AddSingleton<ApprovalBridge>();
+        services.AddSingleton<QuestionBridge>();
             services.AddSingleton<PluginOverridesStore>();
             services.AddSingleton<IWorkspaceStore, WorkspaceStore>();
             services.AddSingleton<IChatSessionService, ChatSessionService>();
