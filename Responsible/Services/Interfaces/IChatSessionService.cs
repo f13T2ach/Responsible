@@ -1,4 +1,4 @@
-using Responsible.ViewModel;
+﻿using Responsible.ViewModel;
 
 namespace Responsible.Services;
 
@@ -108,6 +108,11 @@ public interface IChatSessionService
     event Action<string>? Restarted;
     event Action<string, string>? Completed;
     event Action<ChatChanges>? ChangesReady;
+
+    /// <summary>当前会话里仍在执行的工具调用（顶栏指示器用）。</summary>
+    event Action<IReadOnlyList<RunningTool>>? RunningToolsChanged;
+
+    IReadOnlyList<RunningTool> RunningTools { get; }
     event Action<ChatStats>? StatsChanged;
     event Action<bool>? RunningChanged;
     /// <summary>会话恢复/切换开始与结束；界面据此在空历史时显示加载态。</summary>
@@ -142,3 +147,6 @@ public interface IChatSessionService
     /// <summary>删除某工作区的沙箱副本（会话盘 + 清单/日志），移除工作区时调用。</summary>
     Task RemoveRvmWorkspaceStorageAsync(string workspaceKey);
 }
+
+/// <summary>一次还在跑的工具调用：仅用于展示，不带输出。</summary>
+public sealed record RunningTool(string CallId, string Name, string Summary, long StartedAt);

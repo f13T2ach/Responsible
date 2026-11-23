@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using CommunityToolkit.Mvvm.Messaging;
 using Responsible.Messages;
 using Responsible.ViewModel;
@@ -16,6 +16,7 @@ public sealed partial class ChatSessionService : IChatSessionService
     private readonly object _gate = new();
     private readonly List<ChatMessage> _messages = [];
     private readonly List<ChatChanges> _changes = [];
+    private readonly List<RunningTool> _runningTools = [];
     // DSH 的 session/resume 对已打开会话会报错；记住当前进程里已经打开的会话
     private readonly HashSet<string> _openSessions = [];
     private readonly IMessenger _messenger;

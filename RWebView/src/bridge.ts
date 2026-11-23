@@ -76,6 +76,12 @@ export interface WireChangedFile {
   oversized?: boolean;
 }
 
+export interface WireTask {
+  callId: string;
+  name: string;
+  summary: string;
+}
+
 export interface WireFileEntry {
   name: string;
   dir?: boolean | null;
@@ -126,6 +132,7 @@ export type HostMessage =
   | { type: "changes.show"; changes: WireChanges; path?: string }
   | { type: "approval.request"; approvals: WireApproval[] }
   | { type: "workspace.files"; entries: WireFileEntry[] }
+  | { type: "tasks.running"; tasks: WireTask[] }
   | { type: "changes.reset"; changes?: WireChanges[] }
   | { type: "stats"; stats: WireStats }
   | { type: "toast"; text: string }

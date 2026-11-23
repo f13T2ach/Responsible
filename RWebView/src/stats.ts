@@ -1,6 +1,7 @@
-import type { WireStats } from "./bridge";
+﻿import type { WireStats } from "./bridge";
 import { icons } from "./history";
 import { t } from "./i18n";
+import type { WireTask } from "./bridge";
 
 const formatTokens = (n: number): string =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : `${n}`;
@@ -13,6 +14,10 @@ const formatCache = (rate: number): string => {
 
 export class StatsView {
   readonly bar: HTMLElement;
+  private tasks!: HTMLElement;
+  private tasksLabel!: HTMLElement;
+  private tasksList: WireTask[] = [];
+  private tasksPanel: HTMLElement | null = null;
   private rounds!: HTMLElement;
   private steps!: HTMLElement;
   private tps!: HTMLElement;
@@ -35,9 +40,74 @@ export class StatsView {
     mount.append(this.bar);
   }
 
+  /** 顶栏的运行任务指示器：空闲显示“没有正在运行的任务”，有任务时点开列出详情。 */
+  setTasks(tasks: WireTask[]): void {
+    this.tasksList = tasks;
+    this.tasksLabel.textContent = tasks.length === 0 ? t("tasks.none") : t("tasks.running", tasks.length);
+    this.tasks.classList.toggle("active", tasks.length > 0);
+    this.tasks.classList.toggle("open", tasks.length > 0 && this.tasks.classList.contains("open"));
+    if (tasks.length === 0) this.closeTasks();
+    else if (this.tasks.classList.contains("open")) this.paintTasks();
+  }
+
+  private toggleTasks(): void {
+    if (this.tasksList.length === 0) return;
+    if (this.tasksPanel !== null) { this.closeTasks(); return; }
+    const panel = document.createElement("div");
+    panel.className = "tasks-panel";
+    const head = document.createElement("div");
+    head.className = "tasks-head";
+    head.textContent = t("tasks.title");
+    const list = document.createElement("div");
+    list.className = "tasks-list";
+    panel.append(head, list);
+    this.bar.append(panel);
+    this.tasksPanel = panel;
+    this.tasks.classList.add("open");
+    this.paintTasks();
+    // 点两次关闭：面板外点击也算
+    panel.addEventListener("click", event => event.stopPropagation());
+    document.addEventListener("click", () => this.closeTasks(), { once: true });
+  }
+
+  private paintTasks(): void {
+    const list = this.tasksPanel?.querySelector(".tasks-list");
+    if (!list) return;
+    list.replaceChildren();
+    for (const task of this.tasksList) {
+      const row = document.createElement("div");
+      row.className = "tasks-row";
+      const name = document.createElement("span");
+      name.className = "tasks-name";
+      name.textContent = task.name;
+      const summary = document.createElement("span");
+      summary.className = "tasks-summary";
+      summary.textContent = task.summary;
+      row.append(name, summary);
+      list.append(row);
+    }
+  }
+
+  private closeTasks(): void {
+    this.tasksPanel?.remove();
+    this.tasksPanel = null;
+    this.tasks.classList.remove("open");
+  }
+
+  bindTasksToggle(): void {
+    this.tasks.addEventListener("click", event => {
+      event.stopPropagation();
+      this.toggleTasks();
+    });
+    this.tasks.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this.toggleTasks();
+    });
+  }
   private build(): void {
     this.bar.innerHTML = `
-      <span class="stats-title">${icons.gauge}<span>${t("stats.title")}</span></span>
+      <span class="stats-title stats-tasks" data-f="tasks" role="button" tabindex="0">${icons.gauge}<span data-f="tasksLabel">${t("tasks.none")}</span></span>
       <span class="stat"><b data-f="rounds">0</b><span class="unit">${t("stats.rounds")}</span><b data-f="steps">0</b><span class="unit">${t("stats.steps")}</span></span>
       <span class="stat spark"><svg width="90" height="22" viewBox="0 0 90 22"><polyline points=""/></svg><b data-f="tps">0</b><span class="unit">tok/s</span></span>
       <span class="stat"><b data-f="tokens">0</b><span class="unit">tok</span></span>
@@ -54,6 +124,8 @@ export class StatsView {
     this.context = q("context");
     this.meter = q("meter");
     this.spark = this.bar.querySelector<SVGPolylineElement>("polyline")!;
+    this.tasks = q("tasks");
+    this.tasksLabel = q("tasksLabel");
     this.live = q("live");
     this.liveLabel = q("liveLabel");
   }

@@ -74,3 +74,17 @@ public sealed partial class ChatSessionService
         }
     }
 }
+
+// 顶栏的“N 个工具正在运行”：只暴露只读快照，界面上不持有工具对象
+public sealed partial class ChatSessionService
+{
+    public event Action<IReadOnlyList<RunningTool>>? RunningToolsChanged;
+
+    public IReadOnlyList<RunningTool> RunningTools
+    {
+        get
+        {
+            lock (_gate) return _runningTools.ToArray();
+        }
+    }
+}

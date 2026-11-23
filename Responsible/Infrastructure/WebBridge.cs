@@ -152,6 +152,14 @@ public sealed record WireApproval(
 
 public sealed record WireFileEntry(string Name, bool? Dir = null, long? Size = null);
 
+public sealed record WireTask(string CallId, string Name, string Summary);
+
+public sealed record HostTasks(IReadOnlyList<WireTask> Tasks)
+{
+    public string Type => "tasks.running";
+}
+
+
 public sealed record HostWorkspaceFiles(IReadOnlyList<WireFileEntry> Entries)
 {
     public string Type => "workspace.files";

@@ -1,6 +1,6 @@
-// 右侧栏的状态：谁在开、当前选中的标签。
+﻿// 右侧栏的状态：谁在开、当前选中的标签。
 // 视图用 React（迁移自 DSH 的侧栏视图），vanilla 模块通过这里驱动。
-export type SidebarKind = "review" | "files";
+export type SidebarKind = "review" | "files" | "start";
 
 export interface SidebarTab {
   /** 唯一键：review 用 turn，files 用固定值 */

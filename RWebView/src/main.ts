@@ -20,6 +20,7 @@ const sidebarHost = document.createElement("div");
 sidebarHost.className = "sidebar-host";
 app.append(sidebarHost);
 const stats = new StatsView(chatColumn);
+stats.bindTasksToggle();
 const history = new HistoryView(chatColumn);
 // 审批卡片悬浮在对话区底部；RVM 会话的请求在宿主侧就被拒绝，不会走到这里
 const approvalDock = new ApprovalDock(document.body);
@@ -185,6 +186,9 @@ onMessage((msg: HostMessage) => {
     case "message.done":
       history.done(msg.id, msg.state);
       refreshStreaming();
+      break;
+    case "tasks.running":
+      stats.setTasks(msg.tasks ?? []);
       break;
     case "workspace.files":
       sidebarStore.openTab({ id: "files", kind: "files", title: t("sidebar.entry.files"), data: msg.entries });

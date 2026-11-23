@@ -21,6 +21,8 @@ function tabContent(tab: SidebarTab | undefined) {
       return <ReviewPanel tab={tab} />;
     case "files":
       return <FilesPanel tab={tab} />;
+    case "start":
+      return <StartPage />;
   }
 }
 
@@ -88,6 +90,15 @@ function SidebarBody() {
               </span>
             </button>
           ))}
+          {/* 有标签时在最后一个右边给加号；标签多到溢出时它会贴在条的最右侧 */}
+          <button
+            type="button"
+            className="sidebar-tab-add"
+            aria-label={t("sidebar.newTab")}
+            onClick={() => sidebarStore.openTab({ id: `start:${Date.now()}`, kind: "start", title: t("sidebar.startTab") })}
+          >
+            +
+          </button>
         </div>
       )}
       <div className="sidebar-body">

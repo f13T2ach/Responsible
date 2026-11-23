@@ -246,6 +246,9 @@ public partial class ChatWebView : UserControl
         }
     }
 
+    private void OnRunningTools(IReadOnlyList<RunningTool> tools) => Ui(() =>
+        Post(new HostTasks(tools.Select(tool => new WireTask(tool.CallId, tool.Name, tool.Summary)).ToArray())));
+
     private void OnApprovalPending(IReadOnlyList<WireApproval> approvals) =>
         Ui(() => Post(new HostApprovalRequest(approvals)));
 
@@ -266,6 +269,7 @@ public partial class ChatWebView : UserControl
         session.Restarted += OnRestarted;
         session.Completed += OnCompleted;
         session.ChangesReady += OnChangesReady;
+        session.RunningToolsChanged += OnRunningTools;
         session.StatsChanged += OnStatsChanged;
         session.RunningChanged += OnRunningChanged;
         session.SessionLoadingChanged += OnSessionLoadingChanged;
@@ -281,6 +285,7 @@ public partial class ChatWebView : UserControl
         session.Restarted -= OnRestarted;
         session.Completed -= OnCompleted;
         session.ChangesReady -= OnChangesReady;
+        session.RunningToolsChanged -= OnRunningTools;
         session.StatsChanged -= OnStatsChanged;
         session.RunningChanged -= OnRunningChanged;
         session.SessionLoadingChanged -= OnSessionLoadingChanged;
