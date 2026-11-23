@@ -691,33 +691,18 @@
             </Border>
         </Grid>
 
-        <!--  底部状态栏  -->
+        <!--  底部状态栏：只显示 RVM 运行态（就绪、会话盘、网络、设备）  -->
         <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"
-                    Margin="0,0,0,10">
-            <ui:SymbolIcon Symbol="History24" Style="{StaticResource MoeStatusIconStyle}" Margin="4,0,2,0" />
-            <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="{Binding RoundsStepsText}" />
-            <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="·" Margin="10,0" />
-            <ui:SymbolIcon Symbol="Flash24" Style="{StaticResource MoeStatusIconStyle}" Margin="4,0,2,0" />
+                    Margin="0,0,0,10"
+                    ToolTip="{Binding RvmFooterDetail}"
+                    Visibility="{Binding IsRvmFooterVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <ui:SymbolIcon Symbol="ShieldCheckmark24"
+                           Style="{StaticResource MoeStatusIconStyle}"
+                           Margin="4,0,4,0" />
             <TextBlock Style="{StaticResource MoeStatusTextStyle}"
-                       Text="{Binding TokensPerSecond, StringFormat={}{0} tok/s}" />
-            <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="·" Margin="10,0" />
-            <ui:SymbolIcon Symbol="Database24" Style="{StaticResource MoeStatusIconStyle}" Margin="4,0,2,0" />
-            <TextBlock Style="{StaticResource MoeStatusTextStyle}"
-                       Text="{Binding TokenUsageWithCacheText}" />
-            <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="·" Margin="10,0" />
-            <ui:SymbolIcon Symbol="Gauge24" Style="{StaticResource MoeStatusIconStyle}" Margin="4,0,2,0" />
-            <TextBlock Style="{StaticResource MoeStatusTextStyle}"
-                       Text="{Binding ContextUsageText}"
-                       ToolTip="{DynamicResource L.Moe.ContextTooltip}" />
-            <StackPanel Orientation="Horizontal"
-                        ToolTip="{Binding WorkspaceBadgeDetail}"
-                        Visibility="{Binding IsWorkspaceBadgeVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="·" Margin="10,0" />
-                <ui:SymbolIcon Symbol="Shield24" Style="{StaticResource MoeStatusIconStyle}" Margin="4,0,2,0" />
-                <TextBlock Style="{StaticResource MoeStatusTextStyle}" Text="{Binding WorkspaceBadge}" />
-            </StackPanel>
+                       Text="{Binding RvmFooterText}" />
         </StackPanel>
     </Grid>
 </UserControl>

@@ -140,6 +140,8 @@ public sealed partial class ChatSessionService : IChatSessionService
 
     public string? WorkspaceBadgeDetail => _workspaceBadgeDetail;
 
+    public string? RvmMountRoot => _rvmVirtualRoot;
+
     public event Action<ChatMessage>? Appended;
     public event Action<ChatMessage>? MessageUpdated;
     public event Action? Reloaded;

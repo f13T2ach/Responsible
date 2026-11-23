@@ -76,6 +76,9 @@ public interface IChatSessionService
     string WorkspaceBadge { get; }
     /// <summary>徽标详情：盘符映射或 RVM 不可用的真实原因。</summary>
     string? WorkspaceBadgeDetail { get; }
+
+    /// <summary>RVM 会话盘的挂载点（例如 R:\My Documents_750ca0）；没有会话时为 null。</summary>
+    string? RvmMountRoot { get; }
     /// <summary>DSH 进程级权限目录；内核未就绪或未挂载权限服务时为 null（不显示控件）。</summary>
     DshPermissionCatalog? PermissionCatalog { get; }
     /// <summary>当前会话的权限值（permissions 投影）；会话尚未建立或读取失败时为 null。</summary>

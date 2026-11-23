@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -95,7 +95,8 @@ public partial class MoeViewModel : ObservableObject
         IAclAuthorizationService acl,
         IWorkspacePreparation preparation,
         ApprovalBridge approvals,
-        QuestionBridge questions)
+        QuestionBridge questions,
+        IRvmPolicyService rvmPolicy)
     {
         _messenger = messenger;
         _workspaceStore = workspaceStore;
@@ -111,6 +112,7 @@ public partial class MoeViewModel : ObservableObject
         _approvals.Start();
         // 提问：RVM 会话也要显示（提问不涉及权限）
         _questions = questions;
+        _rvmPolicy = rvmPolicy;
         _questions.IsCurrentSession = id => string.Equals(id, Session.CurrentSessionId, StringComparison.Ordinal);
         _questions.PendingChanged += OnQuestionsChanged;
         _questions.Start();
@@ -158,6 +160,7 @@ public partial class MoeViewModel : ObservableObject
 
     private readonly ApprovalBridge _approvals;
     private readonly QuestionBridge _questions;
+    private readonly IRvmPolicyService _rvmPolicy;
     private readonly IMessenger _messengerForApprovals;
 
     public IChatSessionService Session { get; }
@@ -575,6 +578,36 @@ public partial class MoeViewModel : ObservableObject
 
     public string WorkspaceBadge => Session.WorkspaceBadge;
 
+    // 底部状态栏：只讲 RVM 的运行态（就绪情况 + 网络/设备 + 会话盘）
+    public bool IsRvmFooterVisible => Session.IsRvmProtected;
+
+    public string RvmFooterText
+    {
+        get
+        {
+            if (!Session.IsRvmProtected) return string.Empty;
+            if (IsRvmStarting) return Loc.T("L.Session.RvmStarting");
+            var parts = new List<string>();
+            var badge = Session.WorkspaceBadge;
+            if (!string.IsNullOrEmpty(badge)) parts.Add(badge);
+            // 会话盘挂载点：先问会话，拿不到再从 badge 详情里捞（详情的头一句就是它）
+            var mount = Session.RvmMountRoot;
+            if (string.IsNullOrEmpty(mount) && Session.WorkspaceBadgeDetail is { Length: > 0 } detail)
+            {
+                var matched = System.Text.RegularExpressions.Regex.Match(detail, @"[A-Za-z]:\\[^，,。;\s]+");
+                if (matched.Success) mount = matched.Value;
+            }
+            if (!string.IsNullOrEmpty(mount)) parts.Add(mount!);
+            parts.Add(_rvmPolicy.Current.NetworkEnabled ? "网络已开" : "网络关闭");
+            parts.Add(_rvmPolicy.Current.DevicesEnabled && _rvmPolicy.Current.Devices.Count > 0
+                ? $"设备 {_rvmPolicy.Current.Devices.Count}"
+                : "设备关闭");
+            return string.Join(" · ", parts);
+        }
+    }
+
+    public string? RvmFooterDetail => Session.WorkspaceBadgeDetail;
+
     // 只有 RVM 会话真的挂着时才算“受 RVM 保护”；否则会把普通 preset 也染成保护色
     public bool PermissionIsRvmProtection => Session.IsRvmProtected;
 
@@ -612,6 +645,9 @@ public partial class MoeViewModel : ObservableObject
         OnPropertyChanged(nameof(PermissionIsRvmProtection));
         OnPropertyChanged(nameof(IsRvmStarting));
         OnPropertyChanged(nameof(ComposeBlockedHint));
+        OnPropertyChanged(nameof(RvmFooterText));
+        OnPropertyChanged(nameof(IsRvmFooterVisible));
+        OnPropertyChanged(nameof(RvmFooterDetail));
         SendPromptCommand.NotifyCanExecuteChanged();
         IsRvmControlsVisible = Session.IsRvmProtected;
         if (Session.IsRvmProtected) _ = RefreshRvmDirtyAsync();
