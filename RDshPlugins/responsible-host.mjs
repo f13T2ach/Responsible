@@ -1009,8 +1009,14 @@ function createQuestionBroker() {
       process.stderr.write(`[questions] answer id=${id} known=${entry !== undefined} items=${Array.isArray(answers) ? answers.length : "n/a"}\n`)
       if (entry === undefined) return false
       if (!Array.isArray(answers)) return false
+      // 规范成 DSH 的 schema：id/selected 必备，custom 只能是字符串（null/空串一律省略）
+      const normalized = answers.map(item => ({
+        id: String(item?.id ?? ""),
+        selected: Array.isArray(item?.selected) ? item.selected.map(label => String(label)) : [],
+        ...(typeof item?.custom === "string" && item.custom.length > 0 ? { custom: item.custom } : {}),
+      }))
       waiting.delete(id)
-      entry.settle({ answers })
+      entry.settle({ answers: normalized })
       process.stderr.write(`[questions] settled id=${id}\n`)
       return true
     },
