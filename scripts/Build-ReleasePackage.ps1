@@ -133,24 +133,17 @@ if ($script:runAll -or $Phase -eq 'kernel') {
         $workspaceText = Get-Content -LiteralPath $stageWorkspace -Raw
         if ($workspaceText -notmatch '(?m)^nodeLinker:') {
             # hoisted：第三方包在 node_modules 根上是真文件，不再是一堆 junction。
-            # injectWorkspacePackages：workspace 包也复制成真目录，否则它们仍然是指回
-            # 源码树的符号链接（vendor/* 之间还成环），剪出来的树既跑不起来也剪不干净。
             Add-Content -LiteralPath $stageWorkspace -Value (@(
                         ''
                         '# CI 发行用：真文件布局，避免 junction 森林'
                         'nodeLinker: hoisted'
-                        'injectWorkspacePackages: true'
                     ) -join [Environment]::NewLine)
         }
 
         Push-Location $stage
         try {
-            # 不能带 --frozen-lockfile：injectWorkspacePackages 会改写 lockfile 里
-            # workspace 依赖的记录方式，frozen 会因为 settings 与旧 lockfile 不一致
-            # 直接拒装（ERR_PNPM_LOCKFILE_CONFIG_MISMATCH）。stage 是一次性的，
-            # 让它更新 lockfile 没有副作用。
-            Run '内核：安装 CLI 生产闭包（hoisted + injected）' {
-                pnpm install --prod --no-frozen-lockfile --ignore-scripts `
+            Run '内核：安装 CLI 生产闭包（hoisted）' {
+                pnpm install --prod --frozen-lockfile --ignore-scripts `
                     --filter '@deepseek-ai/dsh...' --os=win32 --cpu=x64
             }
         }
@@ -206,6 +199,14 @@ if ($script:runAll -or $Phase -eq 'package') {
 
     $binJs = Join-Path $coreDst 'apps\cli\lib\bin.js'
     Assert-True (Test-Path -LiteralPath $binJs) '物化后缺少 apps\cli\lib\bin.js'
+
+    # 源码映射与 tsbuildinfo 运行期用不到，体积却不小。
+    Say '清理源码映射'
+    foreach ($pattern in @('*.map', '*.tsbuildinfo')) {
+        Get-ChildItem -LiteralPath $coreDst -Recurse -File -Filter $pattern -Force -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+
     Assert-UnderLimit '内核物化完成'
 
     # 冒烟：发行树里的内核必须能起来（这一步能抓住剪枝/物化搞坏依赖的情况）

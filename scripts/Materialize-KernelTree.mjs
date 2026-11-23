@@ -38,6 +38,12 @@ function isExcluded(rel) {
     if (rel === rule) return true
     if (rel.startsWith(`${rule}/`)) return true
   }
+  // 除根 node_modules 之外，任何层级的 node_modules 都不复制。
+  // hoisted 布局下各 workspace 项目自己的 node_modules 只是指回根上的链接，
+  // 复制它们会把同一批包重复搬进发行树（实测 34 万文件 / 3.5GB），
+  // 而且 workspace 之间的自指链接还会成环。Node 从包里往上找一定能找到根的。
+  const segments = rel.split('/')
+  if (segments.indexOf('node_modules') > 0) return true
   return false
 }
 
