@@ -119,26 +119,32 @@ if ($script:runAll -or $Phase -eq 'kernel') {
         Assert-True (Test-Path -LiteralPath 'apps\cli\lib\bin.js') '内核没有产出 apps/cli/lib/bin.js'
 
         # 发行树必须没有 junction。nodeLinker 只能写在 pnpm-workspace.yaml 里，
-        # 所以这里在 CI 工作区临时改一行（不提交，子模块保持不变）。
-        $workspaceFile = Join-Path $coreSrc 'pnpm-workspace.yaml'
-        $workspaceText = Get-Content -LiteralPath $workspaceFile -Raw
+        # 而在已有的 isolated 树上原地切布局会让 pnpm 去删旧的 workspace 链接并报
+        # EPERM，所以在干净目录里重装一遍 CLI 的生产闭包。
+        Say '内核：复制源码到干净的发行工作区'
+        New-Item -ItemType Directory -Path $dist -Force | Out-Null
+        $stage = Join-Path $dist '_kernel-stage'
+        Remove-Tree $stage
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        & robocopy $coreSrc $stage /E /XD node_modules .turbo /XF .git /NFL /NDL /NJH /NJS /R:1 /W:1 | Out-Null
+        Assert-True ($LASTEXITCODE -le 7) "robocopy 复制内核源码失败（exit $LASTEXITCODE）"
+
+        $stageWorkspace = Join-Path $stage 'pnpm-workspace.yaml'
+        $workspaceText = Get-Content -LiteralPath $stageWorkspace -Raw
         if ($workspaceText -notmatch '(?m)^nodeLinker:') {
-            Add-Content -LiteralPath $workspaceFile -Value "`n# CI 发行用：真文件布局，避免 junction 森林`nnodeLinker: hoisted"
-            Say '      已把 nodeLinker 切到 hoisted'
+            Add-Content -LiteralPath $stageWorkspace -Value "`n# CI 发行用：真文件布局，避免 junction 森林`nnodeLinker: hoisted"
         }
 
-        # 发行只需 CLI 的生产依赖闭包；重新安装会剪掉 devDependencies 与其它 workspace。
-        Run '内核：重装为 CLI 生产闭包（hoisted）' {
-            pnpm install --prod --frozen-lockfile --ignore-scripts `
-                --filter '@deepseek-ai/dsh...' --os=win32 --cpu=x64
+        Push-Location $stage
+        try {
+            Run '内核：安装 CLI 生产闭包（hoisted）' {
+                pnpm install --prod --frozen-lockfile --ignore-scripts `
+                    --filter '@deepseek-ai/dsh...' --os=win32 --cpu=x64
+            }
         }
-        Assert-True (Test-Path -LiteralPath 'apps\cli\lib\bin.js') '重装后 apps/cli/lib/bin.js 消失了'
+        finally { Pop-Location }
 
-        $nm = Join-Path $coreSrc 'node_modules'
-        $pnpmDir = Join-Path $nm '.pnpm'
-        if (Test-Path -LiteralPath $pnpmDir) {
-            Say '      注意：hoisted 下仍然存在 node_modules\.pnpm'
-        }
+        Assert-True (Test-Path -LiteralPath (Join-Path $stage 'apps\cli\lib\bin.js')) '发行工作区里缺少 apps/cli/lib/bin.js'
     }
     finally { Pop-Location }
 }
@@ -176,11 +182,13 @@ if ($script:runAll -or $Phase -eq 'package') {
 
     # 内核：物化成真文件树（不带任何 reparse point）
     Say '内核：物化发行树'
+    $kernelStage = Join-Path $dist '_kernel-stage'
+    Assert-True (Test-Path -LiteralPath (Join-Path $kernelStage 'node_modules')) '发行工作区还没有装依赖（先跑 kernel 阶段）'
     $coreDst = Join-Path $out 'RDshCore'
     if (Test-Path -LiteralPath $coreDst) { Remove-Tree $coreDst }
     New-Item -ItemType Directory -Path $coreDst -Force | Out-Null
     $materialize = Join-Path $Root 'scripts\Materialize-KernelTree.mjs'
-    $stats = & node $materialize $coreSrc $coreDst 'node_modules,apps/cli/lib,apps/cli/package.json' ''
+    $stats = & node $materialize $kernelStage $coreDst 'node_modules,apps/cli/lib,apps/cli/package.json,package.json' ''
     if ($LASTEXITCODE -ne 0) { Die "内核物化失败（exit $LASTEXITCODE）：$stats" }
     Say "      $stats"
 
