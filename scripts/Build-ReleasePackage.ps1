@@ -132,7 +132,15 @@ if ($script:runAll -or $Phase -eq 'kernel') {
         $stageWorkspace = Join-Path $stage 'pnpm-workspace.yaml'
         $workspaceText = Get-Content -LiteralPath $stageWorkspace -Raw
         if ($workspaceText -notmatch '(?m)^nodeLinker:') {
-            Add-Content -LiteralPath $stageWorkspace -Value "`n# CI 发行用：真文件布局，避免 junction 森林`nnodeLinker: hoisted"
+            # hoisted：第三方包在 node_modules 根上是真文件，不再是一堆 junction。
+            # injectWorkspacePackages：workspace 包也复制成真目录，否则它们仍然是指回
+            # 源码树的符号链接（vendor/* 之间还成环），剪出来的树既跑不起来也剪不干净。
+            Add-Content -LiteralPath $stageWorkspace -Value (@(
+                        ''
+                        '# CI 发行用：真文件布局，避免 junction 森林'
+                        'nodeLinker: hoisted'
+                        'injectWorkspacePackages: true'
+                    ) -join [Environment]::NewLine)
         }
 
         Push-Location $stage
@@ -188,7 +196,7 @@ if ($script:runAll -or $Phase -eq 'package') {
     if (Test-Path -LiteralPath $coreDst) { Remove-Tree $coreDst }
     New-Item -ItemType Directory -Path $coreDst -Force | Out-Null
     $materialize = Join-Path $Root 'scripts\Materialize-KernelTree.mjs'
-    $stats = & node $materialize $kernelStage $coreDst 'node_modules,apps/cli/lib,apps/cli/package.json,package.json' ''
+    $stats = & node $materialize $kernelStage $coreDst 'node_modules,apps/cli/lib,apps/cli/package.json,package.json' 'node_modules/.pnpm'
     if ($LASTEXITCODE -ne 0) { Die "内核物化失败（exit $LASTEXITCODE）：$stats" }
     Say "      $stats"
 
