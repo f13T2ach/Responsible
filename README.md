@@ -40,7 +40,7 @@ The channels between them:
 - Host ↔ engine: a named pipe, 24-byte header + `rvm.v1` protobuf
 - Host ↔ frontend: WebView2 `postMessage`
 
-The host injects the kernel plugins (`RDshPlugins/`) into the kernel process; they rewrite the system prompt, take over the sandbox policy, and hand approvals and questions to the UI. **Isolation is enforced by the RVM engine; the plugins only relay requests** — what stops an agent is always a Windows ACL and an AppContainer, never a prompt.
+The host injects the kernel plugins (`RDshPlugins/`) into the kernel process and uses them for session control.
 
 ## Typical workflow
 
@@ -57,14 +57,14 @@ The cross-platform Responsible-CLI is still in development; only the Windows bui
 Requires the .NET 10 SDK, Node.js 20+, MinGW-w64 + CMake + Ninja (RVM and RTray), and the WebView2 Runtime.
 
 ```powershell
-# 1. Frontend (chat area and right sidebar)
+# 1. Frontend
 cd RWebView; npm install; node build.mjs      # emits dist/index.html and dist/diff.html
 
 # 2. RVM engine
 cd RVM; cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; cmake --build build
 .\build\bin\rvm_tests.exe                     # self-test: 79 passed, 0 failed
 
-# 3. Watchdog (optional; last-resort cleanup of drive letters and orphan processes)
+# 3. Watch Dog process
 cd RTray; cmake -S . -B build -G Ninja; cmake --build build
 
 # 4. Host
@@ -73,7 +73,7 @@ cd Responsible; dotnet build                  # or dotnet publish -c Release
 
 Once started, `Responsible.exe` launches `RDshCore` and `RvmEngine` on demand; `RTray.exe` is started by the host and watches the host process handle, so if the host is force-killed it clears the `subst` drive letters and any leftover child processes.
 
-Release packaging, the disk traps that come with it, and the flow actually in use are documented in [BUILD-GUIDE.md](BUILD-GUIDE.md) (English) and [BUILD-GUIDE.zh_CN.md](BUILD-GUIDE.zh_CN.md) (简体中文).
+A **packaging build, not a development build**, is required; see [BUILD-GUIDE.md](BUILD-GUIDE.md) (简体中文: [BUILD-GUIDE.zh_CN.md](BUILD-GUIDE.zh_CN.md)). You may run into problems while compiling the DSH kernel — the guide covers them.
 
 ## RDsh plugins
 
@@ -87,7 +87,7 @@ Note that `runiverse` is a stopgap: with human auditing out of the picture, an A
 
 ## RVM virtual machine
 
-RVM is not an image-driven virtual machine. It achieves file isolation through access control, but not kernel isolation. Enabling memory integrity protection and keeping up with Windows Update are hardening tasks the user is responsible for; RVM does not check these settings and does not block a session because of them — the risk is yours.
+RVM is not an image-driven virtual machine. It achieves file isolation through access control, but not kernel isolation. **Enabling memory integrity protection and keeping up with Windows Update** effectively prevents an AI from escaping through kernel vulnerabilities.
 
 RVM keeps local snapshot archives that record the system configuration and workspace snapshots inside the VM: system configuration, package store entries, and authorization and session logs go to `system.json` / `system.log` / `sessions.log` / `audit.log`; the system layer itself is not writable (an AppContainer has no system write path), and Rollback restores only the workspace.
 
@@ -100,7 +100,7 @@ RVM keeps local snapshot archives that record the system configuration and works
 ### RVM Penetrate
 
 1. RVM lets you set Penetrate Devices: Settings → RVM enumerates only host serial (COM) devices. Once ticked, the engine adds a read/write ACE for that session's AppContainer identity to the device object's security descriptor and revokes it when the session stops. A device that cannot be opened, or a failed grant, makes session startup fail rather than pretend the device is exposed; peripherals you did not tick are not passed through as-is.
-2. RVM lets you set Penetrate Network: off by default, in which case the session has no network capability at all. When on, only the `internetClient` outbound capability is granted; `privateNetworkClientServer` is not granted and there is no loopback exemption. Port masking is fixed semantics: host loopback ports and session inbound ports are mutually invisible, so a session can neither reach host service ports nor bind or listen inside the masked range; there is no per-port allowance. Network auditing samples the host TCP/UDP tables along the command process tree and writes newly observed endpoints to the session archive's `network.log`; sampling has an interval, so very short-lived connections can be missed.
+2. RVM lets you set Penetrate Network: off by default, in which case the session has no network capability at all. When on, only the `internetClient` outbound capability is granted; `privateNetworkClientServer` is not granted and there is no loopback exemption. The equivalent network is implemented by masking unreachable network segments: host loopback ports and session inbound ports are mutually invisible, so a session can neither reach host service ports nor bind or listen inside the masked range; there is no per-port allowance. Network auditing samples the host TCP/UDP tables along the command process tree and writes newly observed endpoints to the session archive's `network.log`; sampling has an interval, so very short-lived connections can be missed.
 
 ### RVM CLI
 
@@ -138,10 +138,8 @@ RWebView implements part of the visual UI.
 
 Configuration files:
 
-- `%APPDATA%\Responsible\rvm-policy.json`: `networkEnabled` / `devicesEnabled` / `devices` / `jailbreakTest`
+- `%APPDATA%\Responsible\rvm-policy.json`: `networkEnabled` / `devicesEnabled` / `devices`
 - `%APPDATA%\Responsible\`: `workspaces.json`, `conversations.json`, `providers.json`, `theme.json`, `acl-authorizations.json`
-
-`jailbreakTest` (sandbox strength test) defaults to `false`. When on, it only replaces the system prompt with “you may actively attack the isolation and faithfully record the raw commands and errors”; **not one sandbox policy is relaxed** — ACLs, drive mapping, session volume scope, and the network switch all keep their original values. Its purpose is to make “how strong the isolation is” verifiable, not to make the model trusted.
 
 Runtime data:
 
@@ -159,7 +157,7 @@ RDshCore/        DSH kernel (node): conversation, tools, the approval and questi
 RDshPlugins/     Plugins injected into the kernel: system prompt, RVM sandbox takeover, approval/question bridge
 RVM/             RVM engine (C++/CMake): AppContainer, ACLs, session volume, subst
 RWebView/        Chat area and right sidebar frontend (TypeScript + React, bundled with esbuild)
-RTray/           Watchdog (C++): clears drive letters and orphan processes after an abnormal host exit
+RTray/           Watch Dog process (C++): clears drive letters and orphan processes after an abnormal host exit
 ```
 
 ## Contributing

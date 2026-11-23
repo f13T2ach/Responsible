@@ -40,7 +40,7 @@ Responsible 由三个进程组成，边界清晰、各自可替换：
 - 宿主 ↔ 引擎：命名管道，24 字节头 + `rvm.v1` protobuf
 - 宿主 ↔ 前端：WebView2 `postMessage`
 
-宿主把内核插件（`RDshPlugins/`）注入内核进程，用它们改写系统提示、接管沙箱策略、把审批与提问转给界面。**隔离由 RVM 引擎执行，插件只负责把请求转出去**——被拦住的永远是 Windows 的 ACL 与 AppContainer，不是提示词。
+宿主把内核插件（`RDshPlugins/`）注入内核进程，用它们进行会话操控。
 
 ## 典型的工作方式
 
@@ -57,14 +57,14 @@ Responsible-CLI 跨平台版本正在开发，目前只支持 Windows 版本。
 需要 .NET 10 SDK、Node.js 20+、MinGW-w64 + CMake + Ninja（RVM 与 RTray）、WebView2 Runtime。
 
 ```powershell
-# 1. 前端（对话区与右侧栏）
+# 1. 前端
 cd RWebView; npm install; node build.mjs      # 产出 dist/index.html 与 dist/diff.html
 
 # 2. RVM 引擎
 cd RVM; cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; cmake --build build
 .\build\bin\rvm_tests.exe                     # 自测：79 passed, 0 failed
 
-# 3. 看护进程（可选，兜底清理盘符与孤儿进程）
+# 3. Watch Dog 进程
 cd RTray; cmake -S . -B build -G Ninja; cmake --build build
 
 # 4. 宿主
@@ -73,7 +73,7 @@ cd Responsible; dotnet build                  # 或 dotnet publish -c Release
 
 启动后 `Responsible.exe` 会按需拉起 `RDshCore` 与 `RvmEngine`；`RTray.exe` 由宿主启动并监视宿主进程句柄，宿主被强杀时由它清掉 `subst` 盘符与遗留子进程。
 
-发行打包、随之而来的磁盘陷阱与现行构建流程，见 [BUILD-GUIDE.zh_CN.md](BUILD-GUIDE.zh_CN.md)（英文版为 [BUILD-GUIDE.md](BUILD-GUIDE.md)）。
+要**打包构建而非开发构建**，见 [BUILD-GUIDE.zh_CN.md](BUILD-GUIDE.zh_CN.md)（英文版为 [BUILD-GUIDE.md](BUILD-GUIDE.md)）。你可能会在编译 DSH 内核时遇到问题，可以参考指南。
 
 ## RDsh 插件
 
@@ -87,7 +87,7 @@ RDsh 插件专为调用敏感工具而生。它接收 `rshell` 传入的 Session
 
 ## RVM 虚拟机
 
-RVM 并不是镜像驱动的虚拟机，它通过访问控制实现了文件隔离，但是没有实现内核隔离。启用内存完整性保护、跟随 Windows 更新是用户自行负责的系统加固事项；RVM 不检查这些设置，也不会因此阻止会话，风险自担。
+RVM 并不是镜像驱动的虚拟机，它通过访问控制实现了文件隔离，但是没有实现内核隔离。**启用内存完整性保护、跟随 Windows 更新** 可以有效避免 AI 利用内核漏洞逃逸。
 
 RVM 在本地有快照档案，能记录 VM 内部的系统配置与工作区快照：系统配置、包存储条目、授权与会话日志记入 `system.json`/`system.log`/`sessions.log`/`audit.log`；系统层本身不可写（AppContainer 没有系统写入通道），Rollback 只还原工作区。
 
@@ -100,7 +100,7 @@ RVM 在本地有快照档案，能记录 VM 内部的系统配置与工作区快
 ### RVM Penetrate
 
 1. RVM 允许你设置 Penetrate Devices：设置 → RVM 只枚举宿主串口（COM）设备，勾选后引擎为该会话的 AppContainer 身份在设备对象安全描述符上添加读写 ACE，停止会话时撤销。设备打不开或授权失败会让会话启动失败，不会伪装成已暴露；未勾选的外设不会被原样穿透。
-2. RVM 允许你设置 Penetrate Network：默认关闭，会话没有任何网络能力。开启后只授予 `internetClient` 出站能力，不授予 `privateNetworkClientServer`，也没有 loopback 豁免。端口遮罩是固定语义：宿主 loopback 端口与会话入站端口互不可见，会话既不能访问宿主服务端口，也不能在遮罩范围内绑定/监听；没有按端口单独放行的配置。网络审计按命令进程树采样宿主 TCP/UDP 表，把新观察到的端点写入会话档案 `network.log`；采样有间隔，极短连接可能漏记。
+2. RVM 允许你设置 Penetrate Network：默认关闭，会话没有任何网络能力。开启后只授予 `internetClient` 出站能力，不授予 `privateNetworkClientServer`，也没有 loopback 豁免。等效网络的实现方式是对不可访问的网段进行遮蔽：宿主 loopback 端口与会话入站端口互不可见，会话既不能访问宿主服务端口，也不能在遮罩范围内绑定/监听；没有按端口单独放行的配置。网络审计按命令进程树采样宿主 TCP/UDP 表，把新观察到的端点写入会话档案 `network.log`；采样有间隔，极短连接可能漏记。
 
 ### RVM CLI
 
@@ -138,10 +138,8 @@ RWebView 实现了部分可视化页面。
 
 配置文件：
 
-- `%APPDATA%\Responsible\rvm-policy.json`：`networkEnabled` / `devicesEnabled` / `devices` / `jailbreakTest`
+- `%APPDATA%\Responsible\rvm-policy.json`：`networkEnabled` / `devicesEnabled` / `devices`
 - `%APPDATA%\Responsible\`：`workspaces.json`、`conversations.json`、`providers.json`、`theme.json`、`acl-authorizations.json`
-
-`jailbreakTest`（沙箱强度测试）默认 `false`。打开后只把系统提示换成「允许主动攻击隔离并如实记录原始命令与报错」，**沙箱策略一条都不放宽**：ACL、盘符映射、会话盘范围、网络开关全部按原值。它存在的目的是让「隔离有多强」这件事可以被验证，而不是让模型被信任。
 
 运行数据：
 
@@ -159,7 +157,7 @@ RDshCore/        DSH 内核（node）：对话、工具、审批与提问的决�
 RDshPlugins/     注入内核的插件：系统提示、RVM 沙箱接管、审批/提问桥
 RVM/             RVM 引擎（C++/CMake）：AppContainer、ACL、会话盘、subst
 RWebView/        对话区与右侧栏前端（TypeScript + React，esbuild 打包）
-RTray/           看护进程（C++）：宿主异常退出后清理盘符与孤儿进程
+RTray/           Watch Dog 进程（C++）：宿主异常退出后清理盘符与孤儿进程
 ```
 
 ## 贡献指南
