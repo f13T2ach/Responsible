@@ -1,4 +1,4 @@
-﻿import { build } from "esbuild";
+import { build } from "esbuild";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 
 const replaceAsync = async (text, pattern, replacer) => {
@@ -13,6 +13,13 @@ const replaceAsync = async (text, pattern, replacer) => {
   return pieces.join("");
 };
 
+// JSX：React 只用于右侧栏/审批这些迁移过来的视图，vanilla 模块继续共存
+const jsx = {
+  loader: { ".tsx": "tsx" },
+  jsx: "automatic",
+  define: { "process.env.NODE_ENV": "\"production\"" },
+};
+
 const js = await build({
   entryPoints: ["src/main.ts"],
   bundle: true,
@@ -21,6 +28,7 @@ const js = await build({
   minify: true,
   write: false,
   legalComments: "none",
+  ...jsx,
 });
 
 const css = await build({
@@ -58,6 +66,7 @@ const diffJs = await build({
   minify: true,
   write: false,
   legalComments: "none",
+  ...jsx,
 });
 
 const diffTemplate = await readFile("src/diff.html", "utf8");

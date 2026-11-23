@@ -1,30 +1,51 @@
-import { applyPalette, connect, defaultPalette, onMessage, send, type HostMessage, type WireStats } from "./bridge";
+﻿import { applyPalette, connect, defaultPalette, onMessage, send, type HostMessage, type WireStats } from "./bridge";
 import { HistoryView, icons } from "./history";
 
 import { StatsView } from "./stats";
 import { ApprovalDock } from "./approval";
+import { mountSidebar, mountSidebarToggle } from "./sidebar/Sidebar";
+import { sidebarStore } from "./sidebar/store";
+
 import { installPreview } from "./preview";
 import { setLocale, t } from "./i18n";
+import type { WireChanges } from "./bridge";
 
 const app = document.getElementById("app")!;
 
-const stats = new StatsView(app);
-const history = new HistoryView(app);
+// 右侧栏要挤压对话区：把所有对话内容放进一列，侧栏作为兄弟节点
+const chatColumn = document.createElement("div");
+chatColumn.className = "chat-column";
+app.append(chatColumn);
+const sidebarHost = document.createElement("div");
+sidebarHost.className = "sidebar-host";
+app.append(sidebarHost);
+const stats = new StatsView(chatColumn);
+const history = new HistoryView(chatColumn);
 // 审批卡片悬浮在对话区底部；RVM 会话的请求在宿主侧就被拒绝，不会走到这里
 const approvalDock = new ApprovalDock(document.body);
-// 改动 diff 由宿主右侧独立的 WebView 渲染：这里只把意图发出去
-history.onToggleDiff = (changes) => send({ type: "showDiff", turn: changes.turn });
-history.onShowDiff = (changes, path, index) => send({ type: "showDiff", turn: changes.turn, path, index });
+mountSidebar(sidebarHost);
+mountSidebarToggle(chatColumn);
+// 改动 diff 在右侧栏里渲染（与 DSH 的 review 标签同一语义）
+function openReview(changes: WireChanges, index: number): void {
+  sidebarStore.openTab({
+    id: `review:${changes.turn}:${index}`,
+    kind: "review",
+    title: t("sidebar.reviewTab", changes.turn),
+    data: changes,
+  });
+}
+history.onToggleDiff = (changes) => openReview(changes, 0);
+history.onShowDiff = (changes, _path, index) => openReview(changes, index);
 
 const empty = document.createElement("div");
 empty.className = "empty";
 empty.innerHTML = `${icons.sparkleBig}<span class="title">${t("empty.title")}</span>`;
-app.append(empty);
+chatColumn.append(empty);
 
 const loading = document.createElement("div");
 loading.className = "loading";
 loading.innerHTML = `<span class="spinner"></span><span class="title">${t("loading")}</span>`;
-app.append(loading);
+chatColumn.append(loading);
 
 const toast = document.createElement("div");
 toast.className = "toast";
