@@ -608,13 +608,28 @@ public partial class MoeViewModel : ObservableObject
     {
         var catalog = Session.PermissionCatalog;
         var value = Session.PermissionValue;
-        var protectedByRvm = Session.IsRvmProtected && Session.HasActiveRvmSession;
+        var protectedByRvm = Session.IsRvmProtected;
         OnPropertyChanged(nameof(PermissionIsRvmProtection));
         OnPropertyChanged(nameof(IsRvmStarting));
         OnPropertyChanged(nameof(ComposeBlockedHint));
         SendPromptCommand.NotifyCanExecuteChanged();
         IsRvmControlsVisible = Session.IsRvmProtected;
         if (Session.IsRvmProtected) _ = RefreshRvmDirtyAsync();
+
+        // RVM 会话先定档：权限只有一档，不依赖内核下发的 catalog，
+        // 所以要在「catalog 为空就置灰」早退之前处理，否则会一直灰着。
+        if (Session.IsRvmProtected)
+        {
+            var rvmStarting = !Session.HasActiveRvmSession;
+            IsPermissionAvailable = true;
+            PermissionEnabled = !rvmStarting;
+            PermissionLabel = Loc.T("L.Moe.Permission.RvmLabel");
+            PermissionIcon = SymbolRegular.Shield24;
+            PermissionHasIcon = true;
+            PermissionDescription = Loc.T("L.Moe.Permission.RvmDescription");
+            PermissionIsDangerous = false;
+            return;
+        }
 
         if (catalog is null || value is null)
         {
@@ -659,16 +674,6 @@ public partial class MoeViewModel : ObservableObject
             });
         }
 
-        if (protectedByRvm)
-        {
-            IsPermissionAvailable = true;
-            PermissionLabel = Loc.T("L.Moe.Permission.RvmLabel");
-            PermissionIcon = SymbolRegular.Shield24;
-            PermissionHasIcon = true;
-            PermissionDescription = PermissionOptions[0].Description;
-            PermissionIsDangerous = false;
-            return;
-        }
 
         var current = PermissionOptions.FirstOrDefault(option =>
             !option.IsRvmProtection && option.Value == value);
