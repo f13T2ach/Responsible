@@ -145,8 +145,12 @@ if ($script:runAll -or $Phase -eq 'kernel') {
 
         Push-Location $stage
         try {
-            Run '内核：安装 CLI 生产闭包（hoisted）' {
-                pnpm install --prod --frozen-lockfile --ignore-scripts `
+            # 不能带 --frozen-lockfile：injectWorkspacePackages 会改写 lockfile 里
+            # workspace 依赖的记录方式，frozen 会因为 settings 与旧 lockfile 不一致
+            # 直接拒装（ERR_PNPM_LOCKFILE_CONFIG_MISMATCH）。stage 是一次性的，
+            # 让它更新 lockfile 没有副作用。
+            Run '内核：安装 CLI 生产闭包（hoisted + injected）' {
+                pnpm install --prod --no-frozen-lockfile --ignore-scripts `
                     --filter '@deepseek-ai/dsh...' --os=win32 --cpu=x64
             }
         }
