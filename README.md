@@ -3,7 +3,7 @@
 
 Taking responsibility for every model response.
 
-A strict file-isolation harness for agents
+Strict file isolation Agent and Harness implementation
 
 <p>
   <a href="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml"><img alt="build-release" src="https://github.com/f13T2ach/Responsible/actions/workflows/build-release.yml/badge.svg?branch=main"></a>
