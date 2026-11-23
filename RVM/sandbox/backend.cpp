@@ -1,4 +1,4 @@
-﻿#include "sandbox/backend.h"
+#include "sandbox/backend.h"
 
 #include <windows.h>
 
@@ -1262,7 +1262,29 @@ class SandboxEnvironment final : public runtime::IEnvironment {
                                    std::to_string(GetTickCount64() - probe_started) + "ms" +
                                    (already_probed ? " (cached)" : ""));
     } else {
-      core::Status granted = GrantDirectory(profile_.sid, spec_.workspace_root, write, true);
+      // 闸一：只允许给 RVM 自己的会话盘授权。宿主工作区一旦被写进 AppContainer ACE，
+    // 就会和 DSH 自己的 ACL 后端抢同一份 DACL（对方在受限令牌下写 DACL 会被拒），
+    // 所以这里在授权之前硬性拒绝，宁可启动失败也不越界。
+    {
+      const fs::path normalized = fs::path(spec_.workspace_root).lexically_normal();
+      const std::wstring shown = normalized.wstring();
+      int levels = 0;
+      bool under_volumes = false;
+      for (auto cursor = normalized.end(); cursor != normalized.begin();) {
+        --cursor;
+        if (++levels > 4) break;
+        const std::wstring part = cursor->wstring();
+        // 会话盘在 volumes\<key>，临时目录在 volumes\<key>\.rvm_temp
+        if (levels >= 2 && levels <= 3 && part == L"volumes") { under_volumes = true; break; }
+      }
+      if (!under_volumes) {
+        return core::Error(core::ErrorCode::kPolicyDenied,
+                           "workspace root is outside the RVM volume root; refusing to touch its ACL",
+                           false, std::string(shown.begin(), shown.end()));
+      }
+    }
+
+    core::Status granted = GrantDirectory(profile_.sid, spec_.workspace_root, write, true);
       if (!granted.ok()) {
         Stop();
         phase_ = runtime::EnvironmentPhase::kFailed;
