@@ -161,6 +161,10 @@
     <sys:String x:Key="L.Rvm.Jailbreak">沙箱强度测试</sys:String>
   <sys:String x:Key="L.Rvm.JailbreakDesc">默认关闭。打开后只把提示词换成“允许主动攻击隔离并如实报告原始命令与报错”，沙箱本身一条策略都不放宽：ACL、盘符映射、会话盘范围保持原样。被拦住才是测量结果。</sys:String>
   <sys:String x:Key="L.Session.RvmStarting">RVM 正在启动，请稍候…</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.NetworkOn">网络已开</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.NetworkOff">网络关闭</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.Devices">设备 {0}</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.DevicesOff">设备关闭</sys:String>
   <sys:String x:Key="L.Rvm.Network">网络穿透</sys:String>
     <sys:String x:Key="L.Rvm.NetworkDesc">默认关闭：会话没有任何网络能力。开启后只授予 internetClient 出站能力；不授予 loopback 豁免与入站能力，因此宿主服务端口保持遮罩。</sys:String>
     <sys:String x:Key="L.Rvm.Devices">设备穿透</sys:String>

@@ -61,10 +61,6 @@
                                          Command="{Binding ToggleSidebarCommand}"
                                          Icon="{ui:SymbolIcon Symbol=PanelLeft24}" />
                         </ui:MenuItem>
-                        <ui:MenuItem Header="{DynamicResource L.Moe.MenuReview}" Style="{StaticResource MoeToolbarMenuItemStyle}"
-                                     Template="{StaticResource MoeTopLevelMenuItemTemplate}">
-                            <ui:MenuItem Header="{DynamicResource L.Moe.StartReview}" Icon="{ui:SymbolIcon Symbol=Play24}" />
-                        </ui:MenuItem>
                         <ui:MenuItem Header="{DynamicResource L.Moe.MenuHelp}" Style="{StaticResource MoeToolbarMenuItemStyle}"
                                      Template="{StaticResource MoeTopLevelMenuItemTemplate}">
                             <ui:MenuItem Header="{DynamicResource L.Moe.Docs}" Icon="{ui:SymbolIcon Symbol=Book24}" />
@@ -194,9 +190,6 @@
                         <ui:Button Style="{StaticResource MoeSidebarButtonStyle}"
                                    Icon="{ui:SymbolIcon Symbol=Globe24}"
                                    Content="{DynamicResource L.Moe.Sites}" />
-                        <ui:Button Style="{StaticResource MoeSidebarButtonStyle}"
-                                   Icon="{ui:SymbolIcon Symbol=Person24}"
-                                   Content="{DynamicResource L.Moe.User}" />
                         <ui:Button Style="{StaticResource MoeSidebarButtonStyle}"
                                    Icon="{ui:SymbolIcon Symbol=Settings24}"
                                    Content="{DynamicResource L.Common.Settings}"

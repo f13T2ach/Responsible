@@ -10,6 +10,23 @@ Responsible 的内核是 Deepseek Harness，通过载入自定插件来重新路
 
 Responsible 支持安装专为 Responsible 定制的 DSH 插件（RDsh）来定义含本地配置文件的敏感工具的调用方式（如Git, SSH）
 
+## 架构
+
+Responsible 由三个进程组成，边界清晰、各自可替换：
+
+| 进程 | 语言/运行 | 职责 |
+| --- | --- | --- |
+| `Responsible.exe` | C# / WPF（net10.0-windows） | 界面、会话与工作区管理、权限档位、RVM 生命周期 |
+| `RDshCore`（node） | DSH 内核 | 模型对话、工具执行、审批与提问的决策点 |
+| `RvmEngine.exe` | C++（CMake） | RVM 沙箱：AppContainer 身份、逐路径 ACL、会话盘、subst 盘符 |
+
+三者之间的通道：
+
+- 宿主 ↔ 内核：stdio 上的 NDJSON JSON-RPC，另有一条本地 HTTP 桥（`127.0.0.1:<port>` + `x-responsible-token`）供前端轮询审批/提问/任务状态
+- 宿主 ↔ 引擎：命名管道，24 字节头 + `rvm.v1` protobuf
+- 宿主 ↔ 前端：WebView2 `postMessage`
+
+宿主把内核插件（`RDshPlugins/`）注入内核进程，用它们改写系统提示、接管沙箱策略、把审批与提问转给界面。**隔离由 RVM 引擎执行，插件只负责把请求转出去**——被拦住的永远是 Windows 的 ACL 与 AppContainer，不是提示词。
 ## 典型的工作方式
 
 Responsible-CLI 跨平台版本正在开发，目前只支持 Windows 版本。
@@ -21,6 +38,44 @@ Responsible-CLI 跨平台版本正在开发，目前只支持 Windows 版本。
 5. 开始工作。当一轮工作完成后，审计会话盘差异，再 Sync 回宿主、Rollback 会话盘，或用 CLI 的 `--flushback` 同步。
 
 ## 构建
+
+需要 .NET 10 SDK、Node.js 20+、MinGW-w64 + CMake + Ninja（RVM 与 RTray）、WebView2 Runtime。
+
+```powershell
+# 1. 前端（对话区与右侧栏）
+cd RWebView; npm install; node build.mjs      # 产出 dist/index.html 与 dist/diff.html
+
+# 2. RVM 引擎
+cd RVM; cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; cmake --build build
+.\build\bin\rvm_tests.exe                     # 自测：79 passed, 0 failed
+
+# 3. 看护进程（可选，兜底清理盘符与孤儿进程）
+cd RTray; cmake -S . -B build -G Ninja; cmake --build build
+
+# 4. 宿主
+cd Responsible; dotnet build                  # 或 dotnet publish -c Release
+```
+
+启动后 `Responsible.exe` 会按需拉起 `RDshCore` 与 `RvmEngine`；`RTray.exe` 由宿主启动并监视宿主进程句柄，宿主被强杀时由它清掉 `subst` 盘符与遗留子进程。
+
+需要 .NET 10 SDK、Node.js 20+、MinGW-w64 + CMake + Ninja（RVM 与 RTray）、WebView2 Runtime。
+
+```powershell
+# 1. 前端（对话区与右侧栏）
+cd RWebView; npm install; node build.mjs      # 产出 dist/index.html 与 dist/diff.html
+
+# 2. RVM 引擎
+cd RVM; cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; cmake --build build
+.\build\bin\rvm_tests.exe                     # 自测：79 passed, 0 failed
+
+# 3. 看护进程（可选，兜底清理盘符与孤儿进程）
+cd RTray; cmake -S . -B build -G Ninja; cmake --build build
+
+# 4. 宿主
+cd Responsible; dotnet build                  # 或 dotnet publish -c Release
+```
+
+启动后 `Responsible.exe` 会按需拉起 `RDshCore` 与 `RvmEngine`；`RTray.exe` 由宿主启动并监视宿主进程句柄，宿主被强杀时由它清掉 `subst` 盘符与遗留子进程。
 
 ## RDsh 插件
 
@@ -71,6 +126,43 @@ RWebView 实现了部分可视化页面。
 
 **要了解更多，前往 RWebView/README.md**
 
+## 功能概览
+
+- **RVM 隔离会话**：工作区按 Git 索引选择性快照到会话盘，命令与文件读写都落在会话盘与专用 temp；宿主用户目录、凭据、SSH/浏览器数据从不授权
+- **权限档位**：RVM 会话固定只有「RVM 隔离保护」一档；会话盘挂载前下拉置灰、输入框不可发送，挂载后放开
+- **审批（approval）**：模型请求提升到 `danger-full-access` 时弹出卡片（拒绝 / 允许一次）；RVM 会话直接拒绝，不打扰用户
+- **提问（ask_user_question）**：对话区底部卡片，支持单选/多选/自定义文本与模型给的等待窗口倒计时
+- **改动卡片与 review**：每一轮改动用一张卡片收口，点开在右侧栏看双行号 diff（side-by-side 与单列可切）
+- **右侧栏**：顶部按钮展开；空态是入口页，有内容时是标签页（review / 工作区文件 / 开始）
+- **底部状态栏**：只显示 RVM 运行态——就绪情况、会话盘挂载点、网络、设备
+
+## 配置与日志
+
+配置文件：
+
+- `%APPDATA%\Responsible\rvm-policy.json`：`networkEnabled` / `devicesEnabled` / `devices` / `jailbreakTest`
+- `%APPDATA%\Responsible\`：`workspaces.json`、`conversations.json`、`providers.json`、`theme.json`、`acl-authorizations.json`
+
+`jailbreakTest`（沙箱强度测试）默认 `false`。打开后只把系统提示换成「允许主动攻击隔离并如实记录原始命令与报错」，**沙箱策略一条都不放宽**：ACL、盘符映射、会话盘范围、网络开关全部按原值。它存在的目的是让「隔离有多强」这件事可以被验证，而不是让模型被信任。
+
+运行数据：
+
+| 路径 | 内容 |
+| --- | --- |
+| `%LOCALAPPDATA%\Responsible\logs\` | `kernel.log`（内核实录，含插件注册/审批/提问）、`rvm-session.log`、`rvm-engine.log`、`webview.log`、`approval.log`、`questions.log`、`crash.log` |
+| `%LOCALAPPDATA%\Responsible\RVM\volumes\<key>\` | 会话盘（挂载为 `R:\<key>`） |
+| `%APPDATA%\Responsible\changes\<sessionId>.jsonl` | 逐轮改动记录（重启后卡片与 diff 的来源） |
+
+## 目录结构
+
+```
+Responsible/     WPF 宿主：界面、会话、工作区、权限、RVM 生命周期
+RDshCore/        DSH 内核（node）：对话、工具、审批与提问的决策点
+RDshPlugins/     注入内核的插件：系统提示、RVM 沙箱接管、审批/提问桥
+RVM/             RVM 引擎（C++/CMake）：AppContainer、ACL、会话盘、subst
+RWebView/        对话区与右侧栏前端（TypeScript + React，esbuild 打包）
+RTray/           看护进程（C++）：宿主异常退出后清理盘符与孤儿进程
+```
 ## 贡献指南
 
 **要了解更多，前往 ./CONTRIBUTE.md**

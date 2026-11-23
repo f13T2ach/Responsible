@@ -161,6 +161,10 @@
     <sys:String x:Key="L.Rvm.Jailbreak">Sandbox probe mode</sys:String>
   <sys:String x:Key="L.Rvm.JailbreakDesc">Off by default. When on, the model is told to attack the isolation and report the raw commands and errors it hits. The sandbox itself is unchanged: every policy, ACL and drive mapping stays exactly as it is.</sys:String>
   <sys:String x:Key="L.Session.RvmStarting">RVM is starting, one moment…</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.NetworkOn">Network on</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.NetworkOff">Network off</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.Devices">Devices {0}</sys:String>
+  <sys:String x:Key="L.Rvm.Footer.DevicesOff">Devices off</sys:String>
   <sys:String x:Key="L.Rvm.Network">Network penetration</sys:String>
     <sys:String x:Key="L.Rvm.NetworkDesc">Off by default: the session has no network capability. When enabled, only the internetClient outbound capability is granted; no loopback exemption or inbound capability is granted, so host service ports remain masked.</sys:String>
     <sys:String x:Key="L.Rvm.Devices">Device penetration</sys:String>
