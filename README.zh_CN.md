@@ -64,7 +64,7 @@ cd RWebView; npm install; node build.mjs      # 产出 dist/index.html 与 dist/
 cd RVM; cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; cmake --build build
 .\build\bin\rvm_tests.exe                     # 自测：79 passed, 0 failed
 
-# 3. Watch Dog 进程
+# 3. Watchdog 进程
 cd RTray; cmake -S . -B build -G Ninja; cmake --build build
 
 # 4. 宿主
@@ -157,7 +157,7 @@ RDshCore/        DSH 内核（node）：对话、工具、审批与提问的决�
 RDshPlugins/     注入内核的插件：系统提示、RVM 沙箱接管、审批/提问桥
 RVM/             RVM 引擎（C++/CMake）：AppContainer、ACL、会话盘、subst
 RWebView/        对话区与右侧栏前端（TypeScript + React，esbuild 打包）
-RTray/           Watch Dog 进程（C++）：宿主异常退出后清理盘符与孤儿进程
+RTray/           Watchdog 进程（C++）：宿主异常退出后清理盘符与孤儿进程
 ```
 
 ## 贡献指南

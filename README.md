@@ -64,7 +64,7 @@ cd RWebView; npm install; node build.mjs      # emits dist/index.html and dist/d
 cd RVM; cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release; cmake --build build
 .\build\bin\rvm_tests.exe                     # self-test: 79 passed, 0 failed
 
-# 3. Watch Dog process
+# 3. Watchdog process
 cd RTray; cmake -S . -B build -G Ninja; cmake --build build
 
 # 4. Host
@@ -157,7 +157,7 @@ RDshCore/        DSH kernel (node): conversation, tools, the approval and questi
 RDshPlugins/     Plugins injected into the kernel: system prompt, RVM sandbox takeover, approval/question bridge
 RVM/             RVM engine (C++/CMake): AppContainer, ACLs, session volume, subst
 RWebView/        Chat area and right sidebar frontend (TypeScript + React, bundled with esbuild)
-RTray/           Watch Dog process (C++): clears drive letters and orphan processes after an abnormal host exit
+RTray/           Watchdog process (C++): clears drive letters and orphan processes after an abnormal host exit
 ```
 
 ## Contributing

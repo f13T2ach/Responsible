@@ -30,7 +30,7 @@ This document is the contribution contract. It covers what to send, how to build
 These invariants define the product. A pull request may strengthen them or leave them alone; it may not weaken them. Anything that touches one of these points must say so in its body and will be reviewed line by line.
 
 1. **Authorized paths.** A session may reach only its session volume, its session temp (`.rvm_temp`), tool directories the user explicitly authorized, and serial devices the user explicitly selected. The host user directory, credential stores, SSH keys and agent, and browser profile data are never authorized, copied, or linked.
-2. **No system-file shortcuts.** The engine does not copy or link system files into the sandbox, and does not re-expose the host filesystem through a new backend. Systems components stay provided by Windows under AppContainer rules.
+2. **No system-file shortcuts.** The engine does not copy or link system files into the sandbox, and does not re-expose the host filesystem through a new backend. System components stay provided by Windows under AppContainer rules.
 3. **Network is off by default.** When enabled it grants only `internetClient`. `privateNetworkClientServer` is never granted, there is no loopback exemption, port masking is fixed, and no per-port allowlist may be introduced.
 4. **Devices are opt-in and revocable.** A serial device is granted by adding an ACE for that session's AppContainer identity and is revoked when the session stops. If the device cannot be opened or the grant fails, session startup fails; it must never pretend the device was exposed.
 5. **Fail closed, never downgrade.** Every unknown or failed state means deny. If isolation cannot be established the engine returns `RVM_UNAVAILABLE` and the host tells the user; a session never silently falls back to a weaker sandbox.
@@ -155,7 +155,7 @@ The workflow builds the full package on `windows-latest`, keeps the kernel submo
 
 ## Pull request body
 
-Every pull request is created by filling in [`.github/pull_request_template.md`](.github/pull_request_template.md). A body that does not follow the structure is returned without review: the reviewer needs the change and its evidence before reading the diff, not after.
+Every pull request is created by filling in [`.github/pull_request_template.md`](.github/pull_request_template.md). A body that does not follow the structure is returned without review: the reviewer needs the change and its evidence before reading the diff, not after. Write the body in English or Simplified Chinese, matching your commits.
 
 ```markdown
 ## Summary
@@ -225,8 +225,8 @@ Fixes #148
 
 - `ctest --test-dir RVM/build --output-on-failure` → 80 passed, 0 failed (was 79)
 - Manual: selected COM3, forced `--sandbox-session` to fail, then read the device
-  security descriptor with `Get-Acl` — the session SID is absent; `system.log` records
-  `device.grant.revoked` with the original error.
+  security descriptor with `Get-Acl` — the session SID is absent, and `system.log`
+  records the revoke event alongside the original failure.
 
 ## Isolation impact
 
@@ -261,8 +261,8 @@ leak; the change writes nothing outside `%LOCALAPPDATA%\Responsible\RVM\`.
 
 ## Documentation
 
-- User-facing documentation is bilingual. `README.md` is the English default and `README.zh_CN.md` is the Simplified Chinese version; a change to one is a change to both, in the same pull request. Component READMEs that have a translated pair follow the same rule.
-- `BUILD-GUIDE.md` changes whenever the build or packaging flow changes, including a trap you had to work around.
+- User-facing documentation is bilingual. `README.md` is the English default and `README.zh_CN.md` is the Simplified Chinese version; a change to one is a change to both, in the same pull request. The same holds for [`BUILD-GUIDE.md`](BUILD-GUIDE.md) and [`BUILD-GUIDE.zh_CN.md`](BUILD-GUIDE.zh_CN.md), and for any component README that has a translated pair.
+- [`BUILD-GUIDE.md`](BUILD-GUIDE.md) changes whenever the build or packaging flow changes, including a trap you had to work around; update its Chinese counterpart in the same pull request.
 - One physical line per paragraph, matching the existing files; UTF-8 without a BOM; no trailing whitespace.
 - This document is intentionally English-only. The contribution contract is read once, and duplicating it invites the two copies to disagree.
 - A comment, a commit message, and a document may be in English or Simplified Chinese, but stay in one language within the file or commit you are editing.
