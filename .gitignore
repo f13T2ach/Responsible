@@ -8,8 +8,11 @@ node_modules/
 TestResults/
 artifacts/
 RVM/build/
+RVM/build-release/
 RVM/cmake-build-debug/
 RVM/.cache/
 Responsible/test_workspace_mock/
 .rvm_temp/
 RTray/build/
+RTray/build-release/
+dist/

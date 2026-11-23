@@ -118,7 +118,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         }
         var info = new ProcessStartInfo
         {
-            FileName = "node",
+            FileName = ResolveNodeExecutable(),
             Arguments = $"\"{bin}\" --profile sdk --patch \"{PatchPath}\"",
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -834,6 +834,12 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     // 注意“会话没建立”（_rvmUnavailable）是另一回事：那不是配置错误，而是这个工作区
     // 暂时建不出会话盘（例如没有 Git 索引）。此时保留 DSH 自带的 sandbox，让工具照常可用，
     // 只把原因挂在 badge 上——否则整条命令通道会变成“什么都不能跑”。
+    // 发行包里带便携 node：优先用同目录下的 node\node.exe，开发期回落到 PATH
+    private static string ResolveNodeExecutable()
+    {
+        var local = Path.Combine(AppContext.BaseDirectory, "node", "node.exe");
+        return File.Exists(local) ? local : "node";
+    }
     private string? WritePatch()
     {
         var plugin = ResolvePlugin();

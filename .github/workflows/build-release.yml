@@ -1,0 +1,76 @@
+name: build-release
+
+# 发行包在 GitHub Actions 上构建：本机只产出 RVM / RTray 两个原生组件
+# （natives/win-x64/，随仓库提交），其余全部在这里重建。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 发行版本号
+        required: false
+        default: 0.0.1-beta
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Windows x64 package
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      CI: 'true'
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+    steps:
+      - name: Checkout (with kernel submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.28.5'
+          run_install: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Report toolchain
+        shell: pwsh
+        run: |
+          "node    : $(node --version)"
+          "npm     : $(npm --version)"
+          "pnpm    : $(pnpm --version)"
+          "dotnet  : $(dotnet --version)"
+          "kernel  : $(git -C RDshCore rev-parse --short HEAD)"
+          "natives : $((Get-ChildItem natives/win-x64 | Measure-Object Length -Sum).Sum / 1MB) MB"
+
+      - name: Build package
+        shell: pwsh
+        run: ./scripts/Build-ReleasePackage.ps1 -Version ${{ inputs.version || '0.0.1-beta' }}
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Responsible-${{ inputs.version || '0.0.1-beta' }}-win-x64
+          path: dist/*.zip
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30

@@ -5,6 +5,21 @@
 
 ---
 
+## 零、现在怎么构建（现行流程）
+
+本机**不再**跑整包构建，只在改到原生代码时构建 RVM / RTray：
+
+| 在哪 | 做什么 |
+| --- | --- |
+| 本机 | `.\build-release.ps1` → 只构建 RVM、RTray（Release），产物落到 `natives\win-x64\` 并提交 |
+| GitHub Actions | `.github/workflows/build-release.yml` → 前端、内核（pnpm）、WPF publish、组装、剪平台、2GB 体积锁、zip、上传 artifact |
+
+理由：本地磁盘只有 130GB 可用，而 `pnpm install` 一次就要 8GB store + 5GB hoisted；
+GitHub 的 Windows runner 是干净且随用随弃的，装坏了丢掉重跑即可。
+
+下面的陷阱清单仍然有效——它们解释了为什么本机不要碰内核依赖树，也解释了
+CI 组装脚本（`scripts/Build-ReleasePackage.ps1`）为什么用 tar 而不是 robocopy。
+
 ## 一、目标
 
 产出一个 **Windows x64 自包含**发行包，版本 `0.0.1-beta`：
