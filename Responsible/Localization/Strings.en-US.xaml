@@ -160,6 +160,7 @@
     <sys:String x:Key="L.Rvm.PenetrationDesc">Penetration policy is fixed into AppContainer capabilities and device ACLs when a session is created. Port masking is fixed: host loopback ports and session inbound ports are mutually invisible. Enabling network only allows outbound connections and does not lift masking. Network audit samples the host TCP/UDP tables for the command process tree and writes newly observed outbound endpoints to network.log in the session archive.</sys:String>
     <sys:String x:Key="L.Rvm.Jailbreak">Sandbox probe mode</sys:String>
   <sys:String x:Key="L.Rvm.JailbreakDesc">Off by default. When on, the model is told to attack the isolation and report the raw commands and errors it hits. The sandbox itself is unchanged: every policy, ACL and drive mapping stays exactly as it is.</sys:String>
+  <sys:String x:Key="L.Session.RvmStarting">RVM is starting, one moment…</sys:String>
   <sys:String x:Key="L.Rvm.Network">Network penetration</sys:String>
     <sys:String x:Key="L.Rvm.NetworkDesc">Off by default: the session has no network capability. When enabled, only the internetClient outbound capability is granted; no loopback exemption or inbound capability is granted, so host service ports remain masked.</sys:String>
     <sys:String x:Key="L.Rvm.Devices">Device penetration</sys:String>

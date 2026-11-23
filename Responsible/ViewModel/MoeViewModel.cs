@@ -515,7 +515,8 @@ public partial class MoeViewModel : ObservableObject
         PromptText = string.Empty;
     }
 
-    private bool CanSendPrompt() => !IsSessionLoading && !string.IsNullOrWhiteSpace(PromptText);
+    // RVM 内核还在启动时不允许发消息：放出去只会得到“会话没建好”的失败
+    private bool CanSendPrompt() => !IsSessionLoading && !IsRvmStarting && !string.IsNullOrWhiteSpace(PromptText);
 
     private void OnPermissionsChanged() => Ui(() =>
     {
@@ -575,7 +576,12 @@ public partial class MoeViewModel : ObservableObject
     public string WorkspaceBadge => Session.WorkspaceBadge;
 
     // 只有 RVM 会话真的挂着时才算“受 RVM 保护”；否则会把普通 preset 也染成保护色
-    public bool PermissionIsRvmProtection => Session.IsRvmProtected && Session.HasActiveRvmSession;
+    public bool PermissionIsRvmProtection => Session.IsRvmProtected;
+
+    // 会话盘还没挂好：下拉与输入框都锁住，并给出等待提示
+    public bool IsRvmStarting => Session.IsRvmProtected && !Session.HasActiveRvmSession;
+
+    public string? ComposeBlockedHint => IsRvmStarting ? Loc.T("L.Session.RvmStarting") : null;
 
     public string? WorkspaceBadgeDetail => Session.WorkspaceBadgeDetail;
 
@@ -604,6 +610,9 @@ public partial class MoeViewModel : ObservableObject
         var value = Session.PermissionValue;
         var protectedByRvm = Session.IsRvmProtected && Session.HasActiveRvmSession;
         OnPropertyChanged(nameof(PermissionIsRvmProtection));
+        OnPropertyChanged(nameof(IsRvmStarting));
+        OnPropertyChanged(nameof(ComposeBlockedHint));
+        SendPromptCommand.NotifyCanExecuteChanged();
         IsRvmControlsVisible = Session.IsRvmProtected;
         if (Session.IsRvmProtected) _ = RefreshRvmDirtyAsync();
 

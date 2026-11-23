@@ -440,7 +440,7 @@ int main() {
 
   if (!outcome.graceful) {
     // 宿主没告别就没了：先让它自己的收尾跑一会儿（IDE 调试、正常 kill 也可能走到这里），
-    // 再把孤儿进程和盘符映射清掉。
+    // 再把孤儿进程清掉。
     if (options.grace_ms > 0) Sleep(options.grace_ms);
 
     if (options.cleanup_children) {
@@ -448,11 +448,14 @@ int main() {
         if (TerminateAndWait(child.pid)) outcome.terminated.push_back(child);
       }
     }
-    if (!options.cleanup_subst_root.empty()) {
-      outcome.failed_drives = ClearDriveMappingsUnder(options.cleanup_subst_root,
-                                                      &outcome.cleared_drives);
-    }
     outcome.heartbeat_age_ms = HeartbeatAgeMs(options.heartbeat);
+  }
+
+  // 盘符清理两种情况都做：宿主正常退出时它自己会清，这里再走一遍是空操作；
+  // 万一它清到一半就没了（子进程还在占着卷），这一步才是最后兜底。
+  if (!options.cleanup_subst_root.empty()) {
+    outcome.failed_drives = ClearDriveMappingsUnder(options.cleanup_subst_root,
+                                                    &outcome.cleared_drives);
   }
 
   std::wstring report_path;
