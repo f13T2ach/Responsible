@@ -1875,3 +1875,16 @@ html, body {
 .q-button.primary { border-color: transparent; background: var(--accent); color: #10202b; font-weight: 600; }
 .q-button.primary:hover { filter: brightness(1.08); }
 .q-button.disabled { opacity: .5; cursor: default; filter: none; }
+
+/* ---- 窄宽度自适应：容器查询跟随对话列宽度（不是视口） ---- */
+.chat-column { container-type: inline-size; }
+
+@container (max-width: 760px) {
+  /* 窄时优先保住数字：先收掉折线图，再收掉缓存命中 */
+  .stat.spark { display: none; }
+}
+
+@container (max-width: 620px) {
+  .stat:has(> span:first-child) { display: none; }
+  .stats-bar { gap: 12px; padding: 10px 16px; }
+}

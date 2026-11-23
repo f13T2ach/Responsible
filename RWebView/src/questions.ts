@@ -1,4 +1,4 @@
-import { send } from "./bridge";
+﻿import { send } from "./bridge";
 import { t } from "./i18n";
 
 // 迁移自 DSH 的提问卡片：底部接管条，逐题作答（单选/多选 + 自定义），带模型自己的倒计时。
@@ -155,6 +155,13 @@ export class QuestionsDock {
       const options = question.options ?? [];
       const list = document.createElement("div");
       list.className = "q-options";
+      const rows: HTMLButtonElement[] = [];
+      const syncRows = () => {
+        const state = this.answers[index];
+        rows.forEach((element, rowIndex) => {
+          element.classList.toggle("active", state.selected.has(options[rowIndex].label));
+        });
+      };
       for (const option of options) {
         const row = document.createElement("button");
         row.type = "button";
@@ -176,13 +183,17 @@ export class QuestionsDock {
           if (question.multiSelect === true) {
             if (state.selected.has(option.label)) state.selected.delete(option.label);
             else state.selected.add(option.label);
+          } else if (state.selected.has(option.label)) {
+            // 单选也允许点掉：再点一次取消选择
+            state.selected.clear();
           } else {
             state.selected.clear();
             state.selected.add(option.label);
           }
-          this.syncOption(row, state.selected.has(option.label));
+          syncRows();
           this.refreshSubmit();
         });
+        rows.push(row);
         list.append(row);
       }
       block.append(list);
@@ -201,10 +212,6 @@ export class QuestionsDock {
     });
 
     this.refreshSubmit();
-  }
-
-  private syncOption(row: HTMLElement, active: boolean): void {
-    row.classList.toggle("active", active);
   }
 
   private refreshSubmit(): void {

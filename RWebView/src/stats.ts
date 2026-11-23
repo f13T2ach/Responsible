@@ -109,7 +109,7 @@ export class StatsView {
   }
   private build(): void {
     this.bar.innerHTML = `
-      <span class="stats-title stats-tasks" data-f="tasks" role="button" tabindex="0">${icons.gauge}<span data-f="tasksLabel">${t("tasks.none")}</span></span>
+      <span class="stats-title stats-tasks empty" data-f="tasks" role="button" tabindex="0">${icons.gauge}<span data-f="tasksLabel">${t("tasks.none")}</span></span>
       <span class="stat"><b data-f="rounds">0</b><span class="unit">${t("stats.rounds")}</span><b data-f="steps">0</b><span class="unit">${t("stats.steps")}</span></span>
       <span class="stat spark"><svg width="90" height="22" viewBox="0 0 90 22"><polyline points=""/></svg><b data-f="tps">0</b><span class="unit">tok/s</span></span>
       <span class="stat"><b data-f="tokens">0</b><span class="unit">tok</span></span>
