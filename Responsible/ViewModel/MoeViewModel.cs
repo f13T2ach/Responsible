@@ -556,15 +556,13 @@ public partial class MoeViewModel : ObservableObject
 
     private void OnQuestionAnswered(string id, IReadOnlyList<WireQuestionAnswer> answers)
     {
-        var payload = new
+        // 只给数组：QuestionBridge 会把它包成 { answers: [...] }，再包一层插件就认不出来了
+        var payload = answers.Select(answer => new
         {
-            answers = answers.Select(answer => new
-            {
-                id = answer.Id,
-                selected = answer.Selected,
-                custom = answer.Custom,
-            }).ToArray(),
-        };
+            id = answer.Id,
+            selected = answer.Selected,
+            custom = answer.Custom,
+        }).ToArray();
         _ = _questions.AnswerAsync(id, payload);
     }
 

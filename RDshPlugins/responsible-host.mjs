@@ -1,4 +1,4 @@
-// Responsible 预载插件：经 cordis patch 挂载进 dsh（--profile sdk --patch ...），
+﻿// Responsible 预载插件：经 cordis patch 挂载进 dsh（--profile sdk --patch ...），
 // 在不 fork 内核的前提下改写部署 persona，向宿主暴露插件清单（Windows 命名管道 NDJSON），
 // 并在 loopback 上开放会话/模型查询接口（默认 1107），供 WPF 与 RWebView 读取持久化数据。
 import { createServer } from 'node:net'
@@ -1006,10 +1006,12 @@ function createQuestionBroker() {
     },
     answer(id, answers) {
       const entry = waiting.get(id)
+      process.stderr.write(`[questions] answer id=${id} known=${entry !== undefined} items=${Array.isArray(answers) ? answers.length : "n/a"}\n`)
       if (entry === undefined) return false
       if (!Array.isArray(answers)) return false
       waiting.delete(id)
       entry.settle({ answers })
+      process.stderr.write(`[questions] settled id=${id}\n`)
       return true
     },
     ask(request) {

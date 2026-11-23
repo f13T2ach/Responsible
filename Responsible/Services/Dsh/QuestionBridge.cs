@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Windows.Threading;
@@ -50,11 +50,13 @@ public sealed class QuestionBridge : IDisposable
         Log($"answer id={id}");
         try
         {
-            await DshBridgeHttpClient.AnswerQuestionAsync(bridge, id, answers, CancellationToken.None)
+            var ok = await DshBridgeHttpClient.AnswerQuestionAsync(bridge, id, answers, CancellationToken.None)
                 .ConfigureAwait(false);
+            Log($"answer posted ok={ok}");
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException or JsonException)
         {
+            Log($"answer failed: {ex.GetType().Name} {ex.Message}");
         }
         Pending = Pending.Where(item => item.Id != id).ToArray();
         PendingChanged?.Invoke(Pending);
