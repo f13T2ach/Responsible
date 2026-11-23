@@ -150,6 +150,13 @@ public sealed record WireApproval(
     string? CallId = null,
     bool? Dangerous = null);
 
+public sealed record WireFileEntry(string Name, bool? Dir = null, long? Size = null);
+
+public sealed record HostWorkspaceFiles(IReadOnlyList<WireFileEntry> Entries)
+{
+    public string Type => "workspace.files";
+}
+
 public sealed record HostApprovalRequest(IReadOnlyList<WireApproval> Approvals)
 {
     public string Type => "approval.request";

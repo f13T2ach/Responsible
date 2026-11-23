@@ -960,6 +960,38 @@ function sendJson(response, status, body) {
 }
 
 // 端口接口只服务本机宿主：loopback 绑定 + 启动时生成的 token，避免同机其它进程冒读会话。
+import { readdir, stat } from 'node:fs/promises'
+import { join } from 'node:path'
+
+// 侧栏「工作区文件」：列会话工作区根目录（不递归），条目数封顶
+async function listWorkspaceFiles(ctx, sessionId) {
+  const query = ctx.get('sessionQuery')
+  if (query === undefined) throw new Error('sessionQuery service is unavailable')
+  const rows = await listSessions(ctx)
+  const row = rows.find(item => item.sessionId === sessionId)
+  const cwd = row?.cwd
+  if (typeof cwd !== 'string' || !cwd) return { cwd: null, entries: [] }
+  let names
+  try {
+    names = await readdir(cwd, { withFileTypes: true })
+  } catch (error) {
+    return { cwd, entries: [], error: String(error?.message ?? error) }
+  }
+  const entries = []
+  for (const dirent of names.slice(0, 300)) {
+    if (dirent.name === '.git' || dirent.name === '.rvm_temp') continue
+    let size = 0
+    try {
+      const info = await stat(join(cwd, dirent.name))
+      size = info.size
+    } catch {
+      // 读不到大小不影响列出名字
+    }
+    entries.push({ name: dirent.name, dir: dirent.isDirectory(), size })
+  }
+  entries.sort((left, right) => Number(right.dir) - Number(left.dir) || left.name.localeCompare(right.name))
+  return { cwd, entries }
+}
 function startHttpBridge(ctx, port, token, approvals) {
   const server = createHttpServer((request, response) => {
     void (async () => {
@@ -999,6 +1031,9 @@ function startHttpBridge(ctx, port, token, approvals) {
           for await (const chunk of request) body += chunk
           const parsed = body ? JSON.parse(body) : {}
           sendJson(response, 200, { ok: true, ...setPermission(ctx, sessionId, parsed.preset) })
+        } else if (request.method === 'GET' && /^\/files\/[^/]+$/.test(url.pathname)) {
+          const sessionId = decodeURIComponent(url.pathname.split('/')[2])
+          sendJson(response, 200, { ok: true, ...(await listWorkspaceFiles(ctx, sessionId)) })
         } else if (request.method === 'GET' && url.pathname === '/approvals') {
           sendJson(response, 200, { ok: true, approvals: approvals.list() })
         } else if (request.method === 'POST' && /^\/approvals\/[^/]+$/.test(url.pathname)) {

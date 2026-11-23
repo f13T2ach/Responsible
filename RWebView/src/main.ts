@@ -178,6 +178,9 @@ onMessage((msg: HostMessage) => {
       history.done(msg.id, msg.state);
       refreshStreaming();
       break;
+    case "workspace.files":
+      sidebarStore.openTab({ id: "files", kind: "files", title: t("sidebar.entry.files"), data: msg.entries });
+      break;
     case "approval.request":
       approvalDock.update(msg.approvals ?? []);
       break;

@@ -8,6 +8,8 @@ namespace Responsible.Services;
 
 // DSH 进程内的 responsible-host 插件在 127.0.0.1:1107 提供只读会话/模型接口；
 // 所有请求带启动时生成的 token，端口只绑定 loopback。
+public sealed record DshWorkspaceFile(string Name, bool Dir, long Size);
+
 public sealed record DshApprovalRow(
     string Id,
     string ToolName,
@@ -204,6 +206,14 @@ internal static class DshBridgeHttpClient
         return envelope.CurrentValue;
     }
 
+    public static async Task<IReadOnlyList<DshWorkspaceFile>> ReadFilesAsync(
+        DshBridgeInfo bridge, string sessionId, CancellationToken cancellationToken)
+    {
+        var envelope = await GetAsync<FilesEnvelope>(
+            bridge, $"/files/{Uri.EscapeDataString(sessionId)}", cancellationToken).ConfigureAwait(false);
+        return envelope.Entries ?? [];
+    }
+
     public static async Task<IReadOnlyList<DshApprovalRow>> ReadApprovalsAsync(
         DshBridgeInfo bridge, CancellationToken cancellationToken)
     {
@@ -286,6 +296,8 @@ internal static class DshBridgeHttpClient
     private sealed record SessionsEnvelope(bool Ok, SessionRow[]? Sessions);
 
     private sealed record ApprovalsEnvelope(bool Ok, DshApprovalRow[]? Approvals);
+
+    private sealed record FilesEnvelope(bool Ok, string? Cwd, DshWorkspaceFile[]? Entries);
 
     private sealed record ApprovalAnswerEnvelope(bool Ok);
     private sealed record SessionRow(

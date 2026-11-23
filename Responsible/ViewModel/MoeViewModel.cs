@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -164,6 +164,9 @@ public partial class MoeViewModel : ObservableObject
     private bool _isDiffOpen;
 
     public WorkspaceChangesViewModel Changes { get; } = new();
+
+    // 右侧面板已经搬进对话 WebView 的侧栏，这里恒为 false，只保留结构
+    public bool NeverExpands => false;
 
     [RelayCommand]
     private void ToggleChangesPanel() => IsDiffOpen = !IsDiffOpen;

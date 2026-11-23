@@ -76,6 +76,12 @@ export interface WireChangedFile {
   oversized?: boolean;
 }
 
+export interface WireFileEntry {
+  name: string;
+  dir?: boolean | null;
+  size?: number | null;
+}
+
 export interface WireApproval {
   id: string;
   toolName: string;
@@ -119,6 +125,7 @@ export type HostMessage =
   | { type: "changes.append"; changes: WireChanges }
   | { type: "changes.show"; changes: WireChanges; path?: string }
   | { type: "approval.request"; approvals: WireApproval[] }
+  | { type: "workspace.files"; entries: WireFileEntry[] }
   | { type: "changes.reset"; changes?: WireChanges[] }
   | { type: "stats"; stats: WireStats }
   | { type: "toast"; text: string }
@@ -131,7 +138,8 @@ export type WebMessage =
   | { type: "stop"; id: string }
   | { type: "openLink"; href: string }
   | { type: "showDiff"; turn: number; path?: string; index?: number }
-  | { type: "approval.answer"; id: string; text: "allowed-once" | "rejected" };
+  | { type: "approval.answer"; id: string; text: "allowed-once" | "rejected" }
+  | { type: "files.request" };
 
 export const defaultPalette: Palette = {
   bg: "#202020",

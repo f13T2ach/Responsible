@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { sidebarStore, type SidebarTab } from "./store";
 import { t } from "../i18n";
 import { ReviewPanel } from "./ReviewPanel";
+import { FilesPanel } from "./FilesPanel";
 
 // 迁移自 DSH 的右侧栏骨架：一个可开关的侧栏，空态是入口卡片，有内容时是一排标签页。
 const icons = {
@@ -19,13 +20,13 @@ function tabContent(tab: SidebarTab | undefined) {
     case "review":
       return <ReviewPanel tab={tab} />;
     case "files":
-      return <div className="sidebar-placeholder">{t("sidebar.filesEmpty")}</div>;
+      return <FilesPanel tab={tab} />;
   }
 }
 
 function StartPage() {
   const entries = [
-    { icon: icons.files, title: t("sidebar.entry.files"), hint: t("sidebar.entry.filesHint") },
+    { icon: icons.files, title: t("sidebar.entry.files"), hint: t("sidebar.entry.filesHint"), onOpen: () => sidebarStore.openTab({ id: "files", kind: "files", title: t("sidebar.entry.files") }) },
     { icon: icons.terminal, title: t("sidebar.entry.terminal"), hint: t("sidebar.entry.terminalHint") },
     { icon: icons.browser, title: t("sidebar.entry.browser"), hint: t("sidebar.entry.browserHint") },
   ];
@@ -33,7 +34,7 @@ function StartPage() {
     <div className="sidebar-start">
       <div className="sidebar-start-list">
         {entries.map(entry => (
-          <button key={entry.title} type="button" className="sidebar-entry" disabled>
+          <button key={entry.title} type="button" className="sidebar-entry" onClick={() => entry.onOpen?.()}>
             <span className="sidebar-entry-icon" dangerouslySetInnerHTML={{ __html: entry.icon }} />
             <span className="sidebar-entry-text">
               <span className="sidebar-entry-title">{entry.title}</span>

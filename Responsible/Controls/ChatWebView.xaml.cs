@@ -1,6 +1,8 @@
 ﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using CommunityToolkit.Mvvm.Messaging;
@@ -158,6 +160,9 @@ public partial class ChatWebView : UserControl
             case "openLink":
                 OpenExternal(msg.Href);
                 break;
+            case "files.request":
+                _ = PushFilesAsync();
+                break;
             case "approval.answer":
                 if (msg.Id is { Length: > 0 } approvalId && msg.Text is { Length: > 0 } outcome)
                     WeakReferenceMessenger.Default.Send(new ApprovalAnsweredMessage(approvalId, outcome));
@@ -215,6 +220,25 @@ public partial class ChatWebView : UserControl
     }
 
     private void OnLanguageChanged() => Ui(() => Post(new HostLocale(Loc.Language)));
+
+    // 侧栏「工作区文件」：取会话工作区根目录，一次性推给前端
+    private async Task PushFilesAsync()
+    {
+        if (_session is not { } session) return;
+        var kernel = (Application.Current as App)?.Services.GetService(typeof(IDshKernelService)) as IDshKernelService;
+        var bridge = kernel?.Bridge;
+        if (bridge is null) return;
+        try
+        {
+            var entries = await DshBridgeHttpClient.ReadFilesAsync(bridge, session.CurrentSessionId, CancellationToken.None)
+                .ConfigureAwait(false);
+            Ui(() => Post(new HostWorkspaceFiles(entries.Select(entry =>
+                new WireFileEntry(entry.Name, entry.Dir, entry.Size)).ToArray())));
+        }
+        catch (Exception ex) when (ex is IOException or HttpRequestException or JsonException)
+        {
+        }
+    }
 
     private void OnApprovalPending(IReadOnlyList<WireApproval> approvals) =>
         Ui(() => Post(new HostApprovalRequest(approvals)));
