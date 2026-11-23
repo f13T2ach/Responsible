@@ -24,7 +24,7 @@
 param(
     [ValidateSet('all', 'frontend', 'kernel', 'package')]
     [string]$Phase = 'all',
-    [string]$Version = '0.0.1-beta',
+    [string]$Version = '0.0.1-beta.2',
     [string]$Root
 )
 
@@ -199,6 +199,13 @@ if ($script:runAll -or $Phase -eq 'package') {
 
     $binJs = Join-Path $coreDst 'apps\cli\lib\bin.js'
     Assert-True (Test-Path -LiteralPath $binJs) '物化后缺少 apps\cli\lib\bin.js'
+    # 宿主在 RVM 接管时按绝对路径加载这两个内核包（ResolveSandboxModule /
+    # ResolveStatsPlugin）。发行树只有 node_modules、没有 packages/ 源码树，
+    # 少一个就会让内核“启动秒失败”，表现成侧栏一直加载、内核反复重启。
+    foreach ($required in @('@deepseek-ai\dsh-sandbox', '@deepseek-ai\dsh-session-stats')) {
+        $entry = Join-Path $coreDst "node_modules\$required\lib\index.js"
+        Assert-True (Test-Path -LiteralPath $entry) "发行树缺少内核包 $required（$entry）"
+    }
 
     # 源码映射与 tsbuildinfo 运行期用不到，体积却不小。
     Say '清理源码映射'

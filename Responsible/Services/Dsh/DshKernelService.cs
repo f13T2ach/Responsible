@@ -53,6 +53,9 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     private CancellationTokenSource? _streamCts;
     private DshRvmBinding? _rvmBinding;
     private string? _rvmUnavailable;
+    // 主动 ShutdownAsync 时置位：Exited 回调据此区分“计划内重启”和“真的挂了”，
+    // 否则每次换模型/换工作区重启都会把状态刷成 “Runtime exited”，像是崩了。
+    private bool _expectedExit;
 
     public bool IsAvailable { get; private set; }
 
@@ -155,9 +158,18 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
 
         _ = ReadLoopAsync(_process);
         _ = DrainStderrAsync(_process);
+        // 新进程还没退出，把上一次计划内关停的标记清掉
+        _expectedExit = false;
         _process.Exited += (_, _) =>
         {
             IsAvailable = false;
+            if (_expectedExit)
+            {
+                // 计划内重启：保留已有状态文案，不要谎报成崩溃
+                _streamCts?.Cancel();
+                FailPending();
+                return;
+            }
             Status = "Runtime exited";
             _streamCts?.Cancel();
             FailPending();
@@ -377,6 +389,8 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         _streamCts?.Cancel();
         var process = _process;
         IsAvailable = false;
+        // 关停是计划内的：Exited 回调不该把它报成 "Runtime exited"
+        _expectedExit = true;
         if (process is null || process.HasExited) return;
         try
         {
@@ -919,10 +933,22 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
     private static string? ResolveStatsPlugin()
     {
         var bin = ResolveBin();
-        if (bin is not null)
+        if (bin is null) return null;
+        var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(bin)!, "..", "..", ".."));
+        return ResolveKernelPackageFile(root, "dsh-session-stats", Path.Combine("session", "session-stats"));
+    }
+
+    // 内核包在开发树里是 packages/<group>/<pkg>/lib/index.js，在发行包里只有
+    // node_modules/@deepseek-ai/<pkg>/lib/index.js（发行树不带 packages/ 源码）。
+    // 两个位置都要找，否则打包版一旦启用 RVM 就会因为“找不到沙箱模块”启动失败。
+    private static string? ResolveKernelPackageFile(string root, string packageName, string repoTail)
+    {
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(root, "node_modules", "@deepseek-ai", packageName, "lib", "index.js"),
+                     Path.Combine(root, "packages", repoTail, "lib", "index.js"),
+                 })
         {
-            var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(bin)!, "..", "..", ".."));
-            var candidate = Path.Combine(root, "packages", "session", "session-stats", "lib", "index.js");
             if (File.Exists(candidate)) return candidate;
         }
         return null;
@@ -954,8 +980,7 @@ public sealed class DshKernelService : IDshKernelService, IDisposable
         var bin = ResolveBin();
         if (bin is null) return null;
         var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(bin)!, "..", "..", ".."));
-        var candidate = Path.Combine(root, "packages", "sandbox", "sandbox", "lib", "index.js");
-        return File.Exists(candidate) ? candidate : null;
+        return ResolveKernelPackageFile(root, "dsh-sandbox", Path.Combine("sandbox", "sandbox"));
     }
 
     private static string? ResolveRepoFile(string folder, string file)

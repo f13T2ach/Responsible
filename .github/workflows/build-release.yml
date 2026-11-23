@@ -13,7 +13,7 @@ on:
       version:
         description: 发行版本号
         required: false
-        default: 0.0.1-beta
+        default: 0.0.1-beta.2
 
 permissions:
   contents: read
@@ -67,20 +67,20 @@ jobs:
 
       - name: 1. 前端（RWebView）
         shell: pwsh
-        run: ./scripts/Build-ReleasePackage.ps1 -Phase frontend -Version ${{ inputs.version || '0.0.1-beta' }}
+        run: ./scripts/Build-ReleasePackage.ps1 -Phase frontend -Version ${{ inputs.version || '0.0.1-beta.2' }}
 
       - name: 2. 内核（DSH CLI 闭包）
         shell: pwsh
-        run: ./scripts/Build-ReleasePackage.ps1 -Phase kernel -Version ${{ inputs.version || '0.0.1-beta' }}
+        run: ./scripts/Build-ReleasePackage.ps1 -Phase kernel -Version ${{ inputs.version || '0.0.1-beta.2' }}
 
       - name: 3. 组装发行包
         shell: pwsh
-        run: ./scripts/Build-ReleasePackage.ps1 -Phase package -Version ${{ inputs.version || '0.0.1-beta' }}
+        run: ./scripts/Build-ReleasePackage.ps1 -Phase package -Version ${{ inputs.version || '0.0.1-beta.2' }}
 
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: Responsible-${{ inputs.version || '0.0.1-beta' }}-win-x64
+          name: Responsible-${{ inputs.version || '0.0.1-beta.2' }}-win-x64
           path: dist/*.zip
           compression-level: 0
           if-no-files-found: error

@@ -36,7 +36,14 @@ public sealed record DshApprovalRow(
 
 internal static class DshBridgeHttpClient
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    // 只连 127.0.0.1：必须绕开系统代理。开了代理的机器（ProxyOverride 为空时）
+    // 会把本机请求也送进代理，代理对内核对端返回 502，症状就是会话列表永远加载不出来。
+    private static readonly HttpClient Http = new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+    })
+    { Timeout = TimeSpan.FromSeconds(15) };
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static async Task<IReadOnlyList<DshSessionRow>> GetSessionsAsync(
@@ -288,9 +295,16 @@ internal static class DshBridgeHttpClient
                 var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                     throw new BridgeRequestException(
-                        ErrorMessage(text) ?? $"Bridge endpoint returned {(int)response.StatusCode}");
+                        ErrorMessage(text) ?? $"Bridge endpoint returned {(int)response.StatusCode}",
+                        (int)response.StatusCode);
                 return JsonSerializer.Deserialize<T>(text, JsonOptions)
                        ?? throw new IOException("The bridge endpoint returned an empty response");
+            }
+            catch (BridgeRequestException ex) when (ex.StatusCode is 502 or 503 or 504)
+            {
+                // 网关错=本机端口还没开始监听（内核仍在启动、或中间有代理代答），
+                // 属于传输层暂时不可用，按可重试处理；其他状态码是真错误，直接抛。
+                last = ex;
             }
             catch (BridgeRequestException)
             {
@@ -311,7 +325,10 @@ internal static class DshBridgeHttpClient
         throw new TimeoutException($"Timed out connecting to the DSH port bridge: {last?.Message}");
     }
 
-    private sealed class BridgeRequestException(string message) : IOException(message);
+    private sealed class BridgeRequestException(string message, int statusCode = 0) : IOException(message)
+    {
+        public int StatusCode { get; } = statusCode;
+    }
 
     private static string? ErrorMessage(string text)
     {
