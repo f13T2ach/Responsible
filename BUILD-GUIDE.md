@@ -62,12 +62,28 @@ CI 组装脚本（`scripts/Build-ReleasePackage.ps1`）为什么用 tar 而不�
 | `robocopy /E` 或 `/MIR` 遍历 | 跟随符号链接环，**卡死 40 分钟以上** |
 | `Remove-Item -Recurse` / `rd /s /q` | 同样跟随环，删除要 **20+ 分钟** |
 
-**正确做法**：用 `tar` 传目录（tar 认硬链接，同一份内容只存一次）。
+**正确做法**：**不要试图归档这棵树**。`tar` 会跟着 junction 递归（本地把 `vendor/*`
+的自指链走到路径超长报错，CI 上直接把 `C:\Windows\system32\tar.exe` 跑到
+`0xC0000005` access violation），`robocopy /E` 会把硬链接展开成几十万份独立文件。
+
+真正可行的是让 pnpm 直接给出**真文件布局**，再逐文件硬链接进发行树：
 
 ```powershell
-tar -cf rdsh.tar -C RDshCore --exclude=./src --exclude=./tests .   # 归档 ≈ 700MB
-tar -xf rdsh.tar -C <out>\RDshCore                                  # 解包同样 ≈ 700MB
+# 1) 构建仍用默认 isolated 布局（已验证能过）
+pnpm install --frozen-lockfile; pnpm run build
+
+# 2) 复制一份不含 node_modules 的源码到 dist\_kernel-stage，
+#    在它的 pnpm-workspace.yaml 里加 nodeLinker: hoisted，
+#    再装 CLI 的生产闭包。不要在旧布局上原地切 linker：
+#    那样 pnpm 会去删旧的 workspace 链接并报 EPERM。
+pnpm install --prod --frozen-lockfile --ignore-scripts `
+    --filter "@deepseek-ai/dsh..." --os=win32 --cpu=x64
+
+# 3) scripts/Materialize-KernelTree.mjs 把剩下的链接物化成真目录/真文件
+#    （文件用同卷硬链接，保住 pnpm 的去重），并排除除根以外的所有 node_modules
 ```
+
+实测：物化 6801 个目录 / 59179 个文件 / 0 个环 / 1.01GB，剪完源码映射 1.07GB。
 
 ### 陷阱 2：`pnpm install` 必然建 store（这是体积大头）
 
@@ -160,17 +176,22 @@ pnpm install --prod --frozen-lockfile --ignore-scripts --filter "@deepseek-ai/ds
 
 ---
 
-## 三、已验证的数据（可以直接用）
+## 三、已验证的数据（2026-11-23 CI 实测）
 
 | 项 | 值 |
 | --- | --- |
-| 内核（`--filter @deepseek-ai/dsh...` 闭包 + `lib`） | **760 MB** |
-| WPF self-contained publish | ~150 MB |
-| node.exe | ~80 MB |
-| RvmEngine.exe | 57.9 MB（+ 3 个 DLL 共 ~3.5MB） |
-| RTray.exe | ~1 MB |
-| RWebView dist | ~1 MB |
-| **目标合计** | **≈ 1.05 GB** |
+| 内核安装（isolated，含 dev） | 1 分 24 秒 |
+| 内核构建（`pnpm run build`，10 个 gate） | 452 秒 |
+| 内核发行闭包（stage + hoisted） | 约 2 分钟 |
+| 物化（6801 目录 / 59179 文件 / 0 环） | 1.01 GB |
+| 内核进包（剪掉源码映射后） | **1067 MB** |
+| WPF self-contained publish + node + 原生 + 前端 | 合计约 1.07 GB |
+| **zip** | **374 MB** |
+| CI 端到端 | 约 13–14 分钟 |
+
+参照：pnpm 的 isolated 闭包 = 414 个包 / 93912 文件 / 逻辑 1249MB；
+hoisted 下各项目自己的 `node_modules` 是冗余的，物化时必须排除，
+否则会变成 346102 个文件 / 3.5GB（实测）。
 
 参照：pnpm 实测 `--filter` 闭包 = 414 个包 / 93912 文件 / 逻辑 1249MB。
 
@@ -226,31 +247,32 @@ tar -xf dist\rdsh.tar -C dist\Responsible-0.0.1-beta-win-x64\RDshCore
 
 ---
 
-## 六、当前代码状态
+## 六、当前代码状态（2026-11-23 起可跑通）
 
-`build-release.ps1` 已被改成 **tar 方案**（不跑 `pnpm install`、不建 store），并带 2GB 体积锁：
+- `build-release.ps1`：本机只构建 RVM / RTray（MinGW Release），产物进 `natives\win-x64\`
+- `.github/workflows/build-release.yml`：三步——前端 / 内核 / 组装，产出 artifact
+- `scripts/Build-ReleasePackage.ps1`：CI 组装脚本，带 2GB 体积锁、内核冒烟测试
+- `scripts/Materialize-KernelTree.mjs`：把 pnpm 的链接物化成真文件树（含环的处理）
 
-- `Step` 每进入一步先 `Assert-Size`，超限 `Clear-Dist` 后抛异常
-- 体积用 `Get-PSDrive D` 差值计算
-- `Clear-Dist` 先 `rd /s /q`，再 Python `rmtree` 兜底
-
-**但它一次都没跑通过。** 不要当成品用。
+已经跑通一轮：1067MB 目录 / 374MB zip / 0 个环 / 内核 `--help` 正常。
 
 ---
 
 ## 七、给接手者的第一条建议
 
-先只验证最小的一步，不要一上来跑整包：
+**不要再试着归档 `RDshCore`。** 那条路已经证伪：`tar` 会跟着 junction 递归，
+CI 上直接把 `C:\Windows\system32\tar.exe` 跑到 access violation。
+
+要验证环境是否就绪，先只跑最小的一步——确认内核能构建、能启动：
 
 ```powershell
-# 只做归档，不解包、不构建、不复制
-$sw = [Diagnostics.Stopwatch]::StartNew()
-tar -cf "$env:TEMP\rdsh-probe.tar" -C RDshCore --exclude=./src --exclude=./tests .
-"tar 用时 $([int]$sw.Elapsed.TotalSeconds)s，大小 $([math]::Round((Get-Item "$env:TEMP\rdsh-probe.tar").Length/1MB)) MB"
-Remove-Item "$env:TEMP\rdsh-probe.tar"
+cd RDshCore
+pnpm install --frozen-lockfile
+pnpm run build
+node apps/cli/lib/bin.js --help     # 这一步过了，说明内核本身没问题
 ```
 
-如果这个归档是 **700MB 左右、耗时 1–3 分钟**，说明硬链接被 tar 正确识别，方案成立，可以继续。如果是 2GB+ 或跑 10 分钟，停下重新分析，别硬推。
+剩下的「怎么装成不含链接的发行树」交给 CI 里那两个脚本，不要在本地重现。
 
 ---
 

@@ -5,6 +5,9 @@ name: build-release
 on:
   push:
     branches: [main]
+    # 文档改动不该触发一次 15 分钟的整包构建
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
     inputs:
       version:
